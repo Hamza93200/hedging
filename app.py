@@ -72,29 +72,30 @@ def hedge_strategy_corrected(df, start_date, rewards_frequency, reward_amount, m
     
     final_spot_notional = df[f'Cumulative Spot ({asset})'].iloc[-1]
     final_forward_notional = df[f'Cumulative Forward ({asset})'].iloc[-1]
-    returns = final_forward_notional/final_spot_notional - 1
+    returns = final_forward_notional / final_spot_notional - 1
     
-    st.write(f"Final accumulated notional with spot strategy: {final_spot_notional}")
-    st.write(f"Final accumulated notional with forward strategy: {final_forward_notional}")
-    st.write(f"Return of forward strategy relative to spot: {returns:.4%}")
+    st.subheader("Results")
+    st.write(f"**Final accumulated notional with spot strategy:** {final_spot_notional:.2f}")
+    st.write(f"**Final accumulated notional with forward strategy:** {final_forward_notional:.2f}")
+    st.write(f"**Return of forward strategy relative to spot:** {returns:.2%}")
     
     return df
 
 def plot_results_adjusted(df, asset):
+    st.subheader("Spot vs Forward Prices Over Time")
     fig, ax = plt.subplots(figsize=(12, 6))
     ax.plot(df['Date'], df[asset], label=f'{asset} Spot Price', color='blue')
-    ax.step(df['Date'], df[f'Forward Price ({asset})'], label=f'{asset} Forward Price', linestyle='-', color='orange')
-    ax.set_title(f'Spot vs Forward Prices Over Time for {asset}')
+    ax.plot(df['Date'], df[f'Forward Price ({asset})'], label=f'{asset} Forward Price', linestyle='--', color='orange')
     ax.set_xlabel('Date')
     ax.set_ylabel('Price')
     ax.legend()
     ax.grid(True)
     st.pyplot(fig)
-
+    
+    st.subheader("Cumulative Notional Exchanged Over Time")
     fig, ax = plt.subplots(figsize=(12, 6))
-    ax.plot(df['Date'], df[f'Cumulative Spot ({asset})'], label=f'Cumulative Spot Notional ({asset})', color='orange')
-    ax.step(df['Date'], df[f'Cumulative Forward ({asset})'], label=f'Cumulative Forward Notional ({asset})', color='blue')
-    ax.set_title(f'Cumulative Notional Exchanged Over Time for {asset}')
+    ax.plot(df['Date'], df[f'Cumulative Spot ({asset})'], label=f'Cumulative Spot Notional ({asset})', color='green')
+    ax.plot(df['Date'], df[f'Cumulative Forward ({asset})'], label=f'Cumulative Forward Notional ({asset})', color='red')
     ax.set_xlabel('Date')
     ax.set_ylabel('Cumulative Notional Value')
     ax.legend()
@@ -102,76 +103,145 @@ def plot_results_adjusted(df, asset):
     st.pyplot(fig)
 
 # Function to calculate and plot payoff for vanilla options
-def calculate_option_payoff(option_type, is_bought, strike_price, spot_price, premium):
+def calculate_option_payoff(option_type, is_bought, strike_price, spot_prices, premium):
     if option_type == 'Call':
-        payoff = max(spot_price - strike_price, 0)
+        intrinsic_values = np.maximum(spot_prices - strike_price, 0)
     else:  # Put
-        payoff = max(strike_price - spot_price, 0)
+        intrinsic_values = np.maximum(strike_price - spot_prices, 0)
     
-    if is_bought:
-        return payoff - premium
-    else:
-        return premium - payoff
+    payoff = intrinsic_values - premium if is_bought else premium - intrinsic_values
+    return payoff
 
 def plot_payoffs(options):
-    spot_prices = np.linspace(0.5 * options['Strike Price'].min(), 1.5 * options['Strike Price'].max(), 500)
+    if options.empty:
+        st.warning("No options added yet. Please add options to see the payoff diagram.")
+        return
+    
+    min_strike = options['Strike Price'].min()
+    max_strike = options['Strike Price'].max()
+    spot_prices = np.linspace(min_strike * 0.5, max_strike * 1.5, 500)
     total_payoff = np.zeros_like(spot_prices)
     
-    plt.figure(figsize=(12, 6))
-    for index, option in options.iterrows():
-        payoff = np.array([calculate_option_payoff(option['Type'], option['Is Bought'], option['Strike Price'], s, option['Premium']) for s in spot_prices])
-        total_payoff += payoff
-        plt.plot(spot_prices, payoff, label=f"Option {index+1}: {option['Type']} ({'Bought' if option['Is Bought'] else 'Sold'})")
+    plt.figure(figsize=(12, 8))
     
-    plt.plot(spot_prices, total_payoff, label='Total Payoff', color='black', linestyle='--')
-    plt.title('Option Payoffs')
-    plt.xlabel('Spot Price')
+    for idx, option in options.iterrows():
+        payoff = calculate_option_payoff(
+            option_type=option['Type'],
+            is_bought=option['Position'] == 'Buy',
+            strike_price=option['Strike Price'],
+            spot_prices=spot_prices,
+            premium=option['Premium']
+        )
+        total_payoff += payoff
+        plt.plot(spot_prices, payoff, label=f"Option {idx+1}: {option['Position']} {option['Type']} (K={option['Strike Price']}, σ={option['Volatility']}, T={option['Maturity']})")
+    
+    plt.plot(spot_prices, total_payoff, label='Total Payoff', color='black', linewidth=2, linestyle='--')
+    plt.title('Options Payoff Diagram')
+    plt.xlabel('Spot Price at Maturity')
     plt.ylabel('Payoff')
     plt.legend()
     plt.grid(True)
     st.pyplot(plt)
 
+def black_scholes_price(option_type, S, K, T, r, sigma):
+    from scipy.stats import norm
+    d1 = (np.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
+    d2 = d1 - sigma * np.sqrt(T)
+    
+    if option_type == 'Call':
+        price = S * norm.cdf(d1) - K * np.exp(-r * T) * norm.cdf(d2)
+    else:
+        price = K * np.exp(-r * T) * norm.cdf(-d2) - S * norm.cdf(-d1)
+    return price
+
 # Streamlit App Interface
+st.set_page_config(page_title="Decimal Hedge - Strategies Simulator", layout="wide")
+
 st.sidebar.title("DECIMAL HEDGE - STRATEGIES SIMULATOR")
 page = st.sidebar.selectbox("Choose a Page", ["Hedging Strategy", "Vanilla Options Payoff Simulator"])
 
 if page == "Hedging Strategy":
     st.title("Hedging Strategy Simulation")
-    # Replace the file uploader with a direct GitHub file read
+    
+    # Load data from GitHub
     github_url = 'https://raw.githubusercontent.com/hamza93200/hedging/main/HP.xlsx'
-    hp_df = pd.read_excel(github_url)
-    st.write("Data Preview:", hp_df.head())
-
+    try:
+        hp_df = pd.read_excel(github_url)
+        st.success("Data loaded successfully from GitHub.")
+    except Exception as e:
+        st.error(f"Failed to load data: {e}")
+    
+    st.subheader("Input Parameters")
     start_date = st.date_input("Start Date", value=pd.to_datetime("2018-03-01"))
     rewards_frequency = st.selectbox("Rewards Frequency", options=['daily', 'weekly', 'monthly'])
     reward_amount = st.number_input("Reward Amount", value=1.0, min_value=0.0)
     maturity = st.selectbox("Maturity Period", options=['1w', '1m', '3m', '6m', '12m'])
     asset = st.selectbox("Asset", options=hp_df.columns[1:])
-
+    
     if st.button("Run Hedging Strategy"):
-        hedged_df_corrected = hedge_strategy_corrected(hp_df, start_date, rewards_frequency, reward_amount, maturity, asset)
-        st.write("Hedging Strategy Results")
-        plot_results_adjusted(hedged_df_corrected, asset)
+        with st.spinner("Running hedging strategy simulation..."):
+            hedged_df_corrected = hedge_strategy_corrected(hp_df, start_date, rewards_frequency, reward_amount, maturity, asset)
+            plot_results_adjusted(hedged_df_corrected, asset)
 
 elif page == "Vanilla Options Payoff Simulator":
     st.title("Vanilla Options Payoff Simulator")
     
-    options_data = []
-    if "options_data" not in st.session_state:
-        st.session_state.options_data = pd.DataFrame(columns=['Type', 'Is Bought', 'Strike Price', 'Premium'])
-
-    with st.form(key='option_form'):
-        option_type = st.selectbox("Option Type", options=['Call', 'Put'])
-        is_bought = st.selectbox("Buy or Sell", options=[True, False], format_func=lambda x: 'Buy' if x else 'Sell')
-        strike_price = st.number_input("Strike Price", value=100.0, min_value=0.0)
-        premium = st.number_input("Premium", value=1.0, min_value=0.0)
-        
-        if st.form_submit_button("Add Option"):
-            new_option = {'Type': option_type, 'Is Bought': is_bought, 'Strike Price': strike_price, 'Premium': premium}
-            st.session_state.options_data = st.session_state.options_data.append(new_option, ignore_index=True)
+    if 'options_data' not in st.session_state:
+        st.session_state.options_data = pd.DataFrame(columns=['Type', 'Position', 'Strike Price', 'Premium', 'Volatility', 'Maturity', 'Risk-Free Rate'])
     
-    st.write("Current Options:")
-    st.write(st.session_state.options_data)
+    st.subheader("Add New Option")
+    with st.form(key='option_form'):
+        cols = st.columns(2)
+        option_type = cols[0].selectbox("Option Type", options=['Call', 'Put'])
+        position = cols[1].selectbox("Position", options=['Buy', 'Sell'])
+        
+        cols = st.columns(3)
+        strike_price = cols[0].number_input("Strike Price", value=100.0, min_value=0.0)
+        premium = cols[1].number_input("Premium", value=5.0, min_value=0.0)
+        volatility = cols[2].number_input("Volatility (σ)", value=0.2, min_value=0.0, format="%.2f")
+        
+        cols = st.columns(2)
+        maturity = cols[0].number_input("Maturity (in years)", value=1.0, min_value=0.01, format="%.2f")
+        risk_free_rate = cols[1].number_input("Risk-Free Rate (r)", value=0.05, min_value=0.0, format="%.2f")
+        
+        calculate_premium = st.checkbox("Calculate Premium using Black-Scholes")
+        
+        submit_button = st.form_submit_button(label="Add Option")
+        
+        if submit_button:
+            if calculate_premium:
+                underlying_price = st.number_input("Underlying Asset Price (S)", value=100.0, min_value=0.0)
+                premium = black_scholes_price(option_type, underlying_price, strike_price, maturity, risk_free_rate, volatility)
+                st.success(f"Calculated Premium: {premium:.2f}")
+            
+            new_option = {
+                'Type': option_type,
+                'Position': position,
+                'Strike Price': strike_price,
+                'Premium': premium,
+                'Volatility': volatility,
+                'Maturity': maturity,
+                'Risk-Free Rate': risk_free_rate
+            }
+            st.session_state.options_data = pd.concat([st.session_state.options_data, pd.DataFrame([new_option])], ignore_index=True)
+            st.success("Option added successfully!")
+    
+    st.subheader("Current Options")
+    st.dataframe(st.session_state.options_data)
     
     if not st.session_state.options_data.empty:
-        plot_payoffs(st.session_state.options_data)
+        if st.button("Plot Payoffs"):
+            with st.spinner("Generating payoff diagram..."):
+                plot_payoffs(st.session_state.options_data)
+        
+        cols = st.columns(2)
+        with cols[0]:
+            remove_index = st.number_input("Index of Option to Remove", min_value=1, max_value=len(st.session_state.options_data), step=1)
+            if st.button("Remove Option"):
+                st.session_state.options_data = st.session_state.options_data.drop(remove_index - 1).reset_index(drop=True)
+                st.success("Option removed successfully!")
+        
+        with cols[1]:
+            if st.button("Reset All Options"):
+                st.session_state.options_data = st.session_state.options_data.iloc[0:0]
+                st.success("All options have been reset.")
