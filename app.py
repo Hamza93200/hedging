@@ -8,10 +8,10 @@ import math as mt
 def convert_maturity_to_days(maturity):
     if 'w' in maturity:
         return int(maturity.replace('w', '')) * 7
-    elif 'm' in maturity:
-        return int(maturity.replace('m', '')) * 30
+    elif 'M' in maturity:
+        return int(maturity.replace('M', '')) * 30
     else:
-        raise ValueError("Invalid maturity format. Use '1w', '1m', '3m', etc.")
+        raise ValueError("Invalid maturity format. Use '1w', '1M', '3M', etc.")
 
 def calculate_forward_price_fixed(df, asset, maturity_days, annual_rate=0.05):
     forward_col = f'Forward Price ({asset})'
@@ -83,7 +83,7 @@ def hedge_strategy_corrected(df, start_date, rewards_frequency, reward_amount, m
 
 def plot_results_adjusted(df, asset):
     st.subheader("Spot vs Forward Prices Over Time")
-    fig, ax = plt.subplots(figsize=(12, 6))
+    fig, ax = plt.subplots(figsize=(8, 4))
     ax.plot(df['Date'], df[asset], label=f'{asset} Spot Price', color='blue')
     ax.plot(df['Date'], df[f'Forward Price ({asset})'], label=f'{asset} Forward Price', linestyle='--', color='orange')
     ax.set_xlabel('Date')
@@ -93,7 +93,7 @@ def plot_results_adjusted(df, asset):
     st.pyplot(fig)
     
     st.subheader("Cumulative Notional Exchanged Over Time")
-    fig, ax = plt.subplots(figsize=(12, 6))
+    fig, ax = plt.subplots(figsize=(8, 4))
     ax.plot(df['Date'], df[f'Cumulative Spot ({asset})'], label=f'Cumulative Spot Notional ({asset})', color='green')
     ax.plot(df['Date'], df[f'Cumulative Forward ({asset})'], label=f'Cumulative Forward Notional ({asset})', color='red')
     ax.set_xlabel('Date')
@@ -122,7 +122,7 @@ def plot_payoffs(options):
     spot_prices = np.linspace(min_strike * 0.5, max_strike * 1.5, 500)
     total_payoff = np.zeros_like(spot_prices)
     
-    plt.figure(figsize=(12, 8))
+    plt.figure(figsize=(8, 4))
     
     for idx, option in options.iterrows():
         payoff = calculate_option_payoff(
@@ -137,8 +137,8 @@ def plot_payoffs(options):
     
     plt.plot(spot_prices, total_payoff, label='Total Payoff', color='black', linewidth=2, linestyle='--')
     plt.title('Options Payoff Diagram')
-    plt.xlabel('Spot Price at Maturity')
-    plt.ylabel('Payoff')
+    plt.xlabel('Spot Price at Maturity (%)')
+    plt.ylabel('Payoff (%)')
     plt.legend()
     plt.grid(True)
     st.pyplot(plt)
@@ -158,10 +158,16 @@ def black_scholes_price(option_type, S, K, T, r, sigma):
 st.set_page_config(page_title="Decimal Hedge - Strategies Simulator", layout="wide")
 
 st.sidebar.title("DECIMAL HEDGE - STRATEGIES SIMULATOR")
-page = st.sidebar.selectbox("Choose a Page", ["Hedging Strategy", "Vanilla Options Payoff Simulator"])
+if st.sidebar.button("Forward Backtesting"):
+    st.experimental_set_query_params(page="ForwardBacktesting")
+if st.sidebar.button("Vanilla Options Payoff Simulator"):
+    st.experimental_set_query_params(page="VanillaOptionsPayoffSimulator")
 
-if page == "Hedging Strategy":
-    st.title("Hedging Strategy Simulation")
+query_params = st.experimental_get_query_params()
+page = query_params.get("page", ["ForwardBacktesting"])[0]
+
+if page == "ForwardBacktesting":
+    st.title("Forward Backtesting")
     
     # Load data from GitHub
     github_url = 'https://raw.githubusercontent.com/hamza93200/hedging/main/HP.xlsx'
@@ -172,48 +178,57 @@ if page == "Hedging Strategy":
         st.error(f"Failed to load data: {e}")
     
     st.subheader("Input Parameters")
-    start_date = st.date_input("Start Date", value=pd.to_datetime("2018-03-01"))
-    rewards_frequency = st.selectbox("Rewards Frequency", options=['daily', 'weekly', 'monthly'])
-    reward_amount = st.number_input("Reward Amount", value=1.0, min_value=0.0)
-    maturity = st.selectbox("Maturity Period", options=['1w', '1m', '3m', '6m', '12m'])
-    asset = st.selectbox("Asset", options=hp_df.columns[1:])
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        start_date = st.date_input("Start Date", value=pd.to_datetime("2018-03-01"))
+    with col2:
+        rewards_frequency = st.selectbox("Rewards Frequency", options=['daily', 'weekly', 'monthly'])
+    with col3:
+        asset = st.selectbox("Asset", options=hp_df.columns[1:])
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        reward_amount = st.number_input("Reward Amount", value=1.0, min_value=0.0)
+    with col2:
+        maturity = st.selectbox("Forward Maturity", options=['1w', '1M', '3M', '6M', '12M'])
     
     if st.button("Run Hedging Strategy"):
         with st.spinner("Running hedging strategy simulation..."):
             hedged_df_corrected = hedge_strategy_corrected(hp_df, start_date, rewards_frequency, reward_amount, maturity, asset)
             plot_results_adjusted(hedged_df_corrected, asset)
 
-elif page == "Vanilla Options Payoff Simulator":
+elif page == "VanillaOptionsPayoffSimulator":
     st.title("Vanilla Options Payoff Simulator")
     
     if 'options_data' not in st.session_state:
         st.session_state.options_data = pd.DataFrame(columns=['Type', 'Position', 'Strike Price', 'Premium', 'Volatility', 'Maturity', 'Risk-Free Rate'])
+        # Add a default call option
+        st.session_state.options_data = pd.concat([st.session_state.options_data, pd.DataFrame([{
+            'Type': 'Call',
+            'Position': 'Buy',
+            'Strike Price': 100.0,
+            'Premium': 0.0,
+            'Volatility': 0.2,
+            'Maturity': 1.0,
+            'Risk-Free Rate': 0.05
+        }])], ignore_index=True)
     
     st.subheader("Add New Option")
     with st.form(key='option_form'):
-        cols = st.columns(2)
+        cols = st.columns(3)
         option_type = cols[0].selectbox("Option Type", options=['Call', 'Put'])
         position = cols[1].selectbox("Position", options=['Buy', 'Sell'])
+        strike_price = cols[2].number_input("Strike Price (%)", value=100.0, min_value=0.0)
         
         cols = st.columns(3)
-        strike_price = cols[0].number_input("Strike Price", value=100.0, min_value=0.0)
-        premium = cols[1].number_input("Premium", value=5.0, min_value=0.0)
-        volatility = cols[2].number_input("Volatility (σ)", value=0.2, min_value=0.0, format="%.2f")
+        volatility = cols[0].number_input("Volatility (σ)", value=0.2, min_value=0.0, format="%.2f")
+        maturity = cols[1].number_input("Maturity (in years)", value=1.0, min_value=0.01, format="%.2f")
+        risk_free_rate = cols[2].number_input("Risk-Free Rate (r)", value=0.05, min_value=0.0, format="%.2f")
         
-        cols = st.columns(2)
-        maturity = cols[0].number_input("Maturity (in years)", value=1.0, min_value=0.01, format="%.2f")
-        risk_free_rate = cols[1].number_input("Risk-Free Rate (r)", value=0.05, min_value=0.0, format="%.2f")
+        underlying_price = st.number_input("Underlying Asset Price (%)", value=100.0, min_value=0.0)
+        premium = black_scholes_price(option_type, underlying_price, strike_price, maturity, risk_free_rate, volatility)
         
-        calculate_premium = st.checkbox("Calculate Premium using Black-Scholes")
-        
-        submit_button = st.form_submit_button(label="Add Option")
-        
-        if submit_button:
-            if calculate_premium:
-                underlying_price = st.number_input("Underlying Asset Price (S)", value=100.0, min_value=0.0)
-                premium = black_scholes_price(option_type, underlying_price, strike_price, maturity, risk_free_rate, volatility)
-                st.success(f"Calculated Premium: {premium:.2f}")
-            
+        if st.form_submit_button(label="Add Option"):
             new_option = {
                 'Type': option_type,
                 'Position': position,
@@ -225,23 +240,27 @@ elif page == "Vanilla Options Payoff Simulator":
             }
             st.session_state.options_data = pd.concat([st.session_state.options_data, pd.DataFrame([new_option])], ignore_index=True)
             st.success("Option added successfully!")
+            plot_payoffs(st.session_state.options_data)
     
     st.subheader("Current Options")
-    st.dataframe(st.session_state.options_data)
+    for idx, option in st.session_state.options_data.iterrows():
+        st.write(f"Option {idx+1}: {option['Position']} {option['Type']} (K={option['Strike Price']}%, σ={option['Volatility']}%, T={option['Maturity']} years)")
+        if st.button(f"Remove Option {idx+1}"):
+            st.session_state.options_data = st.session_state.options_data.drop(idx).reset_index(drop=True)
+            st.success(f"Option {idx+1} removed successfully!")
+            plot_payoffs(st.session_state.options_data)
     
-    if not st.session_state.options_data.empty:
-        if st.button("Plot Payoffs"):
-            with st.spinner("Generating payoff diagram..."):
-                plot_payoffs(st.session_state.options_data)
-        
-        cols = st.columns(2)
-        with cols[0]:
-            remove_index = st.number_input("Index of Option to Remove", min_value=1, max_value=len(st.session_state.options_data), step=1)
-            if st.button("Remove Option"):
-                st.session_state.options_data = st.session_state.options_data.drop(remove_index - 1).reset_index(drop=True)
-                st.success("Option removed successfully!")
-        
-        with cols[1]:
-            if st.button("Reset All Options"):
-                st.session_state.options_data = st.session_state.options_data.iloc[0:0]
-                st.success("All options have been reset.")
+    if st.button("Reset All Options"):
+        st.session_state.options_data = pd.DataFrame(columns=['Type', 'Position', 'Strike Price', 'Premium', 'Volatility', 'Maturity', 'Risk-Free Rate'])
+        # Add a default call option
+        st.session_state.options_data = pd.concat([st.session_state.options_data, pd.DataFrame([{
+            'Type': 'Call',
+            'Position': 'Buy',
+            'Strike Price': 100.0,
+            'Premium': 0.0,
+            'Volatility': 0.2,
+            'Maturity': 1.0,
+            'Risk-Free Rate': 0.05
+        }])], ignore_index=True)
+        st.success("Options reset successfully!")
+        plot_payoffs(st.session_state.options_data)
