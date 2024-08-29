@@ -3,6 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
 import math as mt
+from scipy.stats import norm
 
 # Helper Functions
 def convert_maturity_to_days(maturity):
@@ -101,21 +102,110 @@ def plot_results_adjusted(df, asset):
     ax.grid(True)
     st.pyplot(fig)
 
-# Streamlit App Interface
-st.title("Hedging Strategy Simulation")
+def black_scholes_price(S, K, T, r, sigma, option_type='call'):
+    d1 = (np.log(S / K) + (r + 0.5 * sigma**2) * T) / (sigma * np.sqrt(T))
+    d2 = d1 - sigma * np.sqrt(T)
+    
+    if option_type == 'call':
+        price = S * norm.cdf(d1) - K * np.exp(-r * T) * norm.cdf(d2)
+    elif option_type == 'put':
+        price = K * np.exp(-r * T) * norm.cdf(-d2) - S * norm.cdf(-d1)
+    else:
+        raise ValueError("Invalid option type. Use 'call' or 'put'.")
+    
+    return price
 
-# Replace the file uploader with a direct GitHub file read
-github_url = 'https://raw.githubusercontent.com/hamza93200/hedging/main/HP.xlsx'
-hp_df = pd.read_excel(github_url)
-st.write("Data Preview:", hp_df.head())
+def payoff_chart(options):
+    S = np.linspace(0.5, 1.5, 500)  # Underlying asset price range
+    total_payoff = np.zeros_like(S)
 
-start_date = st.date_input("Start Date", value=pd.to_datetime("2018-03-01"))
-rewards_frequency = st.selectbox("Rewards Frequency", options=['daily', 'weekly', 'monthly'])
-reward_amount = st.number_input("Reward Amount", value=1.0, min_value=0.0)
-maturity = st.selectbox("Maturity Period", options=['1w', '1m', '3m', '6m', '12m'])
-asset = st.selectbox("Asset", options=hp_df.columns[1:])
+    for option in options:
+        K = option['strike']
+        T = option['maturity']
+        r = option['rate']
+        sigma = option['volatility']
+        option_type = option['type']
+        quantity = option['quantity']
 
-if st.button("Run Hedging Strategy"):
-    hedged_df_corrected = hedge_strategy_corrected(hp_df, start_date, rewards_frequency, reward_amount, maturity, asset)
-    st.write("Hedging Strategy Results")
-    plot_results_adjusted(hedged_df_corrected, asset)
+        if option_type == 'call':
+            payoff = np.maximum(S - K, 0)
+        elif option_type == 'put':
+            payoff = np.maximum(K - S, 0)
+
+        total_payoff += quantity * payoff
+
+    fig, ax = plt.subplots(figsize=(12, 6))
+    ax.plot(S, total_payoff, label='Total Payoff', color='blue')
+    ax.set_title('Options Payoff')
+    ax.set_xlabel('Underlying Price')
+    ax.set_ylabel('Payoff')
+    ax.axhline(0, color='black', linestyle='--')
+    ax.legend()
+    ax.grid(True)
+    st.pyplot(fig)
+
+def options_payoff_simulator():
+    st.header("Options Payoff Simulator")
+
+    options = []
+
+    if 'option_count' not in st.session_state:
+        st.session_state['option_count'] = 0
+
+    if st.button("Add Option"):
+        st.session_state['option_count'] += 1
+
+    for i in range(st.session_state['option_count']):
+        st.subheader(f"Option {i+1}")
+        option_type = st.selectbox(f"Option Type {i+1}", options=['call', 'put'], key=f"type_{i}")
+        buy_or_sell = st.selectbox(f"Buy or Sell {i+1}", options=['buy', 'sell'], key=f"buy_sell_{i}")
+        strike = st.number_input(f"Strike Price {i+1}", value=1.0, key=f"strike_{i}")
+        maturity = st.number_input(f"Maturity (years) {i+1}", value=1.0, key=f"maturity_{i}")
+        volatility = st.number_input(f"Volatility {i+1}", value=0.2, key=f"volatility_{i}")
+        rate = st.number_input(f"Risk-Free Rate {i+1}", value=0.05, key=f"rate_{i}")
+        quantity = st.number_input(f"Quantity {i+1}", value=1, key=f"quantity_{i}")
+
+        # Adjust quantity for sell (negative quantity)
+        quantity = -quantity if buy_or_sell == 'sell' else quantity
+
+        # Calculate the option price using Black-Scholes
+        price = black_scholes_price(1.0, strike, maturity, rate, volatility, option_type)
+        st.write(f"Black-Scholes Price for Option {i+1}: {price:.4f}")
+
+        options.append({
+            'type': option_type,
+            'strike': strike,
+            'maturity': maturity,
+            'volatility': volatility,
+            'rate': rate,
+            'quantity': quantity
+        })
+
+    if options:
+        payoff_chart(options)
+
+# Streamlit App Interface with Sidebar
+st.sidebar.title("DECIMAL HEDGE - STRATEGIES SIMULATOR")
+page = st.sidebar.selectbox("Choose a page", ["Hedging Strategy", "Options Payoff Simulation"])
+
+if page == "Hedging Strategy":
+    st.title("Hedging Strategy Simulation")
+    
+    # Replace the file uploader with a direct GitHub file read
+    github_url = 'https://raw.githubusercontent.com/your-username/your-repo/main/path/to/your/file.xlsx'
+    hp_df = pd.read_excel(github_url)
+    st.write("Data Preview:", hp_df.head())
+
+    start_date = st.date_input("Start Date", value=pd.to_datetime("2018-03-01"))
+    rewards_frequency = st.selectbox("Rewards Frequency", options=['daily', 'weekly', 'monthly'])
+    reward_amount = st.number_input("Reward Amount", value=1.0, min_value=0.0)
+    maturity = st.selectbox("Maturity Period", options=['1w', '1m', '3m', '6m', '12m'])
+    asset = st.selectbox("Asset", options=hp_df.columns[1:])
+
+    if st.button("Run Hedging Strategy"):
+        hedged_df_corrected = hedge_strategy_corrected(hp_df, start_date, rewards_frequency, reward_amount, maturity, asset)
+        st.write("Hedging Strategy Results")
+        plot_results_adjusted(hedged_df_corrected, asset)
+
+elif page == "Options Payoff Simulation":
+    options_payoff_simulator()
