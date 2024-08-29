@@ -104,18 +104,18 @@ def plot_results_adjusted(df, asset):
 # Streamlit App Interface
 st.title("Hedging Strategy Simulation")
 
-uploaded_file = st.file_uploader("Upload an Excel file with historical price data", type="xlsx")
-if uploaded_file:
-    hp_df = pd.read_excel(uploaded_file)
-    st.write("Data Preview:", hp_df.head())
+# Replace the file uploader with a direct GitHub file read
+github_url = 'https://raw.githubusercontent.com/hamza93200/hedging/main/HP.xlsx'
+hp_df = pd.read_excel(github_url)
+st.write("Data Preview:", hp_df.head())
 
-    start_date = st.date_input("Start Date", value=pd.to_datetime("2018-03-01"))
-    rewards_frequency = st.selectbox("Rewards Frequency", options=['daily', 'weekly', 'monthly'])
-    reward_amount = st.number_input("Reward Amount", value=1.0, min_value=0.0)
-    maturity = st.selectbox("Maturity Period", options=['1w', '1m', '3m', '6m', '12m'])
-    asset = st.selectbox("Asset", options=hp_df.columns[1:])
+start_date = st.date_input("Start Date", value=pd.to_datetime("2018-03-01"))
+rewards_frequency = st.selectbox("Rewards Frequency", options=['daily', 'weekly', 'monthly'])
+reward_amount = st.number_input("Reward Amount", value=1.0, min_value=0.0)
+maturity = st.selectbox("Maturity Period", options=['1w', '1m', '3m', '6m', '12m'])
+asset = st.selectbox("Asset", options=hp_df.columns[1:])
 
-    if st.button("Run Hedging Strategy"):
-        hedged_df_corrected = hedge_strategy_corrected(hp_df, start_date, rewards_frequency, reward_amount, maturity, asset)
-        st.write("Hedging Strategy Results")
-        plot_results_adjusted(hedged_df_corrected, asset)
+if st.button("Run Hedging Strategy"):
+    hedged_df_corrected = hedge_strategy_corrected(hp_df, start_date, rewards_frequency, reward_amount, maturity, asset)
+    st.write("Hedging Strategy Results")
+    plot_results_adjusted(hedged_df_corrected, asset)
