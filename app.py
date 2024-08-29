@@ -101,21 +101,77 @@ def plot_results_adjusted(df, asset):
     ax.grid(True)
     st.pyplot(fig)
 
+# Function to calculate and plot payoff for vanilla options
+def calculate_option_payoff(option_type, is_bought, strike_price, spot_price, premium):
+    if option_type == 'Call':
+        payoff = max(spot_price - strike_price, 0)
+    else:  # Put
+        payoff = max(strike_price - spot_price, 0)
+    
+    if is_bought:
+        return payoff - premium
+    else:
+        return premium - payoff
+
+def plot_payoffs(options):
+    spot_prices = np.linspace(0.5 * options['Strike Price'].min(), 1.5 * options['Strike Price'].max(), 500)
+    total_payoff = np.zeros_like(spot_prices)
+    
+    plt.figure(figsize=(12, 6))
+    for index, option in options.iterrows():
+        payoff = np.array([calculate_option_payoff(option['Type'], option['Is Bought'], option['Strike Price'], s, option['Premium']) for s in spot_prices])
+        total_payoff += payoff
+        plt.plot(spot_prices, payoff, label=f"Option {index+1}: {option['Type']} ({'Bought' if option['Is Bought'] else 'Sold'})")
+    
+    plt.plot(spot_prices, total_payoff, label='Total Payoff', color='black', linestyle='--')
+    plt.title('Option Payoffs')
+    plt.xlabel('Spot Price')
+    plt.ylabel('Payoff')
+    plt.legend()
+    plt.grid(True)
+    st.pyplot(plt)
+
 # Streamlit App Interface
-st.title("Hedging Strategy Simulation")
+st.sidebar.title("DECIMAL HEDGE - STRATEGIES SIMULATOR")
+page = st.sidebar.selectbox("Choose a Page", ["Hedging Strategy", "Vanilla Options Payoff Simulator"])
 
-# Replace the file uploader with a direct GitHub file read
-github_url = 'https://raw.githubusercontent.com/hamza93200/hedging/main/HP.xlsx'
-hp_df = pd.read_excel(github_url)
-st.write("Data Preview:", hp_df.head())
+if page == "Hedging Strategy":
+    st.title("Hedging Strategy Simulation")
+    # Replace the file uploader with a direct GitHub file read
+    github_url = 'https://raw.githubusercontent.com/hamza93200/hedging/main/HP.xlsx'
+    hp_df = pd.read_excel(github_url)
+    st.write("Data Preview:", hp_df.head())
 
-start_date = st.date_input("Start Date", value=pd.to_datetime("2018-03-01"))
-rewards_frequency = st.selectbox("Rewards Frequency", options=['daily', 'weekly', 'monthly'])
-reward_amount = st.number_input("Reward Amount", value=1.0, min_value=0.0)
-maturity = st.selectbox("Maturity Period", options=['1w', '1m', '3m', '6m', '12m'])
-asset = st.selectbox("Asset", options=hp_df.columns[1:])
+    start_date = st.date_input("Start Date", value=pd.to_datetime("2018-03-01"))
+    rewards_frequency = st.selectbox("Rewards Frequency", options=['daily', 'weekly', 'monthly'])
+    reward_amount = st.number_input("Reward Amount", value=1.0, min_value=0.0)
+    maturity = st.selectbox("Maturity Period", options=['1w', '1m', '3m', '6m', '12m'])
+    asset = st.selectbox("Asset", options=hp_df.columns[1:])
 
-if st.button("Run Hedging Strategy"):
-    hedged_df_corrected = hedge_strategy_corrected(hp_df, start_date, rewards_frequency, reward_amount, maturity, asset)
-    st.write("Hedging Strategy Results")
-    plot_results_adjusted(hedged_df_corrected, asset)
+    if st.button("Run Hedging Strategy"):
+        hedged_df_corrected = hedge_strategy_corrected(hp_df, start_date, rewards_frequency, reward_amount, maturity, asset)
+        st.write("Hedging Strategy Results")
+        plot_results_adjusted(hedged_df_corrected, asset)
+
+elif page == "Vanilla Options Payoff Simulator":
+    st.title("Vanilla Options Payoff Simulator")
+    
+    options_data = []
+    if "options_data" not in st.session_state:
+        st.session_state.options_data = pd.DataFrame(columns=['Type', 'Is Bought', 'Strike Price', 'Premium'])
+
+    with st.form(key='option_form'):
+        option_type = st.selectbox("Option Type", options=['Call', 'Put'])
+        is_bought = st.selectbox("Buy or Sell", options=[True, False], format_func=lambda x: 'Buy' if x else 'Sell')
+        strike_price = st.number_input("Strike Price", value=100.0, min_value=0.0)
+        premium = st.number_input("Premium", value=1.0, min_value=0.0)
+        
+        if st.form_submit_button("Add Option"):
+            new_option = {'Type': option_type, 'Is Bought': is_bought, 'Strike Price': strike_price, 'Premium': premium}
+            st.session_state.options_data = st.session_state.options_data.append(new_option, ignore_index=True)
+    
+    st.write("Current Options:")
+    st.write(st.session_state.options_data)
+    
+    if not st.session_state.options_data.empty:
+        plot_payoffs(st.session_state.options_data)
