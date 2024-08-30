@@ -217,7 +217,7 @@ elif page == "VanillaOptionsPayoffSimulator":
 
         
         premium = black_scholes_price(option_type, 100, strike_price, maturity, risk_free_rate, volatility)
-        if position = "Sell":
+        if position == "Sell":
                 premium = -premium
         
         if st.form_submit_button(label="Add Option"):
