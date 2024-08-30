@@ -214,8 +214,11 @@ elif page == "VanillaOptionsPayoffSimulator":
         position = cols[1].selectbox("Position", options=['Buy', 'Sell'])
         strike_price = cols[2].number_input("Strike Price (%)", value=100.0, min_value=0.0)
         maturity = cols[3].number_input("Maturity (in years)", value=1.0, min_value=0.01, format="%.2f")
+
         
         premium = black_scholes_price(option_type, 100, strike_price, maturity, risk_free_rate, volatility)
+        if position = "Sell":
+                premium = -premium
         
         if st.form_submit_button(label="Add Option"):
             new_option = {
@@ -256,10 +259,8 @@ elif page == "VanillaOptionsPayoffSimulator":
     st.markdown("---")
 
     # After the loop, update the graph
-    plot_payoffs(st.session_state.options_data)
 
     if st.button("Reset All Options"):
         st.session_state.options_data = pd.DataFrame(columns=['Type', 'Position', 'Strike Price', 'Premium', 'Volatility', 'Maturity', 'Risk-Free Rate'])
         plot_payoffs(st.session_state.options_data)
 
-    plot_payoffs(st.session_state.options_data)
