@@ -215,10 +215,9 @@ elif page == "VanillaOptionsPayoffSimulator":
         strike_price = cols[2].number_input("Strike Price (%)", value=100.0, min_value=0.0)
         maturity = cols[3].number_input("Maturity (in years)", value=1.0, min_value=0.01, format="%.2f")
 
-        
         premium = black_scholes_price(option_type, 100, strike_price, maturity, risk_free_rate, volatility)
         if position == "Sell":
-                premium = -premium
+            premium = -premium
         
         if st.form_submit_button(label="Add Option"):
             new_option = {
@@ -232,35 +231,37 @@ elif page == "VanillaOptionsPayoffSimulator":
             }
             st.session_state.options_data = pd.concat([st.session_state.options_data, pd.DataFrame([new_option])], ignore_index=True)
             st.success("Option added successfully!")
-            plot_payoffs(st.session_state.options_data)
     
+    # Display current option legs and the sum of premiums
+    st.subheader("Current Option Legs")
+    if not st.session_state.options_data.empty:
+        for idx, option in st.session_state.options_data.iterrows():
+            cols = st.columns([1, 1, 1, 1, 1, 1, 1])
+            cols[0].write(option['Position'])
+            cols[1].write(1)  # Assuming quantity is 1 for simplicity
+            cols[2].write(option['Type'])
+            cols[3].write(option['Strike Price'])
+            cols[4].write(int(option['Maturity'] * 365))  # Days to expiry
+            cols[5].write(f"{option['Volatility'] * 100:.2f}%")
+            cols[6].write(f"{option['Premium']:.2f} USD")
+            remove_button = cols[6].button("❌", key=f"remove_{idx}")
+
+            # Handle removal of option leg
+            if remove_button:
+                st.session_state.options_data = st.session_state.options_data.drop(idx).reset_index(drop=True)
+                break  # exit the loop to prevent changes during iteration
+
     # Display sum of premiums
     total_premium = st.session_state.options_data['Premium'].sum()
     st.write(f"**Total Premium:** {total_premium:.2f} USD")
-
-    st.subheader("Current Option Legs")
-    for idx, option in st.session_state.options_data.iterrows():
-        cols = st.columns([1, 1, 1, 1, 1, 1, 1])
-        cols[0].selectbox("Position", options=['Buy', 'Sell'], index=0 if option['Position'] == 'Buy' else 1, key=f"position_{idx}")
-        cols[1].number_input("Quantity", value=1, min_value=1, key=f"quantity_{idx}")
-        cols[2].selectbox("Call / Put / Stock", options=['Call', 'Put'], index=0 if option['Type'] == 'Call' else 1, key=f"type_{idx}")
-        cols[3].number_input("Strike", value=option['Strike Price'], min_value=0.0, key=f"strike_{idx}")
-        cols[4].number_input("Days to Expiry", value=int(option['Maturity'] * 365), min_value=0, key=f"days_{idx}")
-        cols[5].number_input("Volatility, %", value=option['Volatility'] * 100, min_value=0.0, key=f"volatility_{idx}")
-        cols[6].number_input("Premium", value=option['Premium'], min_value=0.0, key=f"premium_{idx}")
-        remove_button = cols[6].button("❌", key=f"remove_{idx}")
-
-        # Handle removal of option leg
-        if remove_button:
-            st.session_state.options_data = st.session_state.options_data.drop(idx).reset_index(drop=True)
-            break  # exit the loop to prevent changes during iteration
 
     # Separate the current options and plot sections
     st.markdown("---")
 
     # After the loop, update the graph
+    st.subheader("Options Payoff Diagram")
+    plot_payoffs(st.session_state.options_data)
 
     if st.button("Reset All Options"):
         st.session_state.options_data = pd.DataFrame(columns=['Type', 'Position', 'Strike Price', 'Premium', 'Volatility', 'Maturity', 'Risk-Free Rate'])
         plot_payoffs(st.session_state.options_data)
-
