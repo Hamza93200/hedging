@@ -233,18 +233,18 @@ elif page == "VanillaOptionsPayoffSimulator":
     
     st.subheader("Current Option Legs")
     for idx, option in st.session_state.options_data.iterrows():
-        cols = st.columns([1, 1, 1, 1, 1, 1, 1, 1])
-        cols[0].selectbox("Position", options=['Buy', 'Sell'], index=0 if option['Position'] == 'Buy' else 1, key=f"position_{idx}")
-        cols[1].number_input("Quantity", value=1, min_value=1, key=f"quantity_{idx}")
-        cols[2].selectbox("Call / Put / Stock", options=['Call', 'Put'], index=0 if option['Type'] == 'Call' else 1, key=f"type_{idx}")
-        cols[3].number_input("Strike", value=option['Strike Price'], min_value=0.0, key=f"strike_{idx}")
-        cols[4].number_input("Days to Expiry", value=int(option['Maturity']*365), min_value=0, key=f"days_{idx}")
-        cols[5].number_input("Volatility, %", value=option['Volatility']*100, min_value=0.0, key=f"volatility_{idx}")
-        cols[6].number_input("Premium", value=option['Premium'], min_value=0.0, key=f"premium_{idx}")
-        cols[7].write(f"{option['Premium']:.4f}", key=f"debit_credit_{idx}")
-        if cols[8].button("❌", key=f"remove_{idx}"):
-            st.session_state.options_data = st.session_state.options_data.drop(idx).reset_index(drop=True)
-            st.experimental_rerun()
+    cols = st.columns([1, 1, 1, 1, 1, 1, 1])
+    cols[0].selectbox("Position", options=['Buy', 'Sell'], index=0 if option['Position'] == 'Buy' else 1, key=f"position_{idx}")
+    cols[1].number_input("Quantity", value=1, min_value=1, key=f"quantity_{idx}")
+    cols[2].selectbox("Call / Put / Stock", options=['Call', 'Put'], index=0 if option['Type'] == 'Call' else 1, key=f"type_{idx}")
+    cols[3].number_input("Strike", value=option['Strike Price'], min_value=0.0, key=f"strike_{idx}")
+    cols[4].number_input("Days to Expiry", value=int(option['Maturity']*365), min_value=0, key=f"days_{idx}")
+    cols[5].number_input("Volatility, %", value=option['Volatility']*100, min_value=0.0, key=f"volatility_{idx}")
+    cols[6].number_input("Premium", value=option['Premium'], min_value=0.0, key=f"premium_{idx}")
+    cols[6].write(f"{option['Premium']:.4f}", key=f"debit_credit_{idx}")
+    if cols[6].button("❌", key=f"remove_{idx}"):
+        st.session_state.options_data = st.session_state.options_data.drop(idx).reset_index(drop=True)
+        st.experimental_rerun()
     
     if st.button("Reset All Options"):
         st.session_state.options_data = pd.DataFrame(columns=['Type', 'Position', 'Strike Price', 'Premium', 'Volatility', 'Maturity', 'Risk-Free Rate'])
