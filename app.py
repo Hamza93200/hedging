@@ -249,7 +249,7 @@ elif page == "VanillaOptionsPayoffSimulator":
             # Handle removal of option leg
             if remove_button:
                 st.session_state.options_data = st.session_state.options_data.drop(idx).reset_index(drop=True)
-                break  # exit the loop to prevent changes during iteration
+                st.experimental_rerun()  # Ensure the page updates immediately
 
     # Display sum of premiums
     total_premium = st.session_state.options_data['Premium'].sum()
@@ -258,10 +258,41 @@ elif page == "VanillaOptionsPayoffSimulator":
     # Separate the current options and plot sections
     st.markdown("---")
 
-    # After the loop, update the graph
+    # Improved plotting section
     st.subheader("Options Payoff Diagram")
-    plot_payoffs(st.session_state.options_data)
+    if st.session_state.options_data.empty:
+        st.warning("No options added yet. Please add options to see the payoff diagram.")
+    else:
+        plot_payoffs(st.session_state.options_data)
 
+    # Handle reset action
     if st.button("Reset All Options"):
         st.session_state.options_data = pd.DataFrame(columns=['Type', 'Position', 'Strike Price', 'Premium', 'Volatility', 'Maturity', 'Risk-Free Rate'])
-        plot_payoffs(st.session_state.options_data)
+        st.experimental_rerun()  # Ensure the page updates immediately
+
+# Improved `plot_payoffs` function
+def plot_payoffs(options):
+    if options.empty:
+        return  # Early exit if no options are present
+    
+    spot_prices = np.linspace(50, 150, 500)  # Adjusted range centered on 100%
+    total_payoff = np.zeros_like(spot_prices)
+    
+    for _, option in options.iterrows():
+        payoff = calculate_option_payoff(
+            option_type=option['Type'],
+            is_bought=option['Position'] == 'Buy',
+            strike_price=option['Strike Price'],
+            spot_prices=spot_prices,
+            premium=option['Premium']
+        )
+        total_payoff += payoff
+    
+    plt.figure(figsize=(8, 4))
+    plt.step(spot_prices, total_payoff, label='Total Payoff', color='black', linewidth=2, linestyle='--', where='mid')
+    plt.title('Options Payoff Diagram')
+    plt.xlabel('Spot Price at Maturity (%)')
+    plt.ylabel('Payoff (%)')
+    plt.legend()
+    plt.grid(True)
+    st.pyplot(plt)
