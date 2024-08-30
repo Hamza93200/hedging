@@ -249,11 +249,11 @@ elif page == "VanillaOptionsPayoffSimulator":
         break  # exit the loop to prevent changes during iteration
 
 # After the loop, update the graph
-plot_payoffs(st.session_state.options_data)
+    plot_payoffs(st.session_state.options_data)
 
     
     if st.button("Reset All Options"):
         st.session_state.options_data = pd.DataFrame(columns=['Type', 'Position', 'Strike Price', 'Premium', 'Volatility', 'Maturity', 'Risk-Free Rate'])
-        plot_payoffs(st.session_state.options_data)
+         plot_payoffs(st.session_state.options_data)
 
     plot_payoffs(st.session_state.options_data)
