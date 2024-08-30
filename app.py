@@ -249,7 +249,7 @@ elif page == "VanillaOptionsPayoffSimulator":
             # Handle removal of option leg
             if remove_button:
                 st.session_state.options_data = st.session_state.options_data.drop(idx).reset_index(drop=True)
-                st.experimental_rerun()  # Ensure the page updates immediately
+                st.experimental_set_query_params(page="VanillaOptionsPayoffSimulator")  # Force page rerun
 
     # Display sum of premiums
     total_premium = st.session_state.options_data['Premium'].sum()
@@ -268,7 +268,7 @@ elif page == "VanillaOptionsPayoffSimulator":
     # Handle reset action
     if st.button("Reset All Options"):
         st.session_state.options_data = pd.DataFrame(columns=['Type', 'Position', 'Strike Price', 'Premium', 'Volatility', 'Maturity', 'Risk-Free Rate'])
-        st.experimental_rerun()  # Ensure the page updates immediately
+        st.experimental_set_query_params(page="VanillaOptionsPayoffSimulator")  # Force page rerun
 
 # Improved `plot_payoffs` function
 def plot_payoffs(options):
@@ -296,3 +296,4 @@ def plot_payoffs(options):
     plt.legend()
     plt.grid(True)
     st.pyplot(plt)
+
