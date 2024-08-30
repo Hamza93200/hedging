@@ -173,7 +173,6 @@ if page == "ForwardBacktesting":
     github_url = 'https://raw.githubusercontent.com/hamza93200/hedging/main/HP.xlsx'
     try:
         hp_df = pd.read_excel(github_url)
-        st.success("Data loaded successfully from GitHub.")
     except Exception as e:
         st.error(f"Failed to load data: {e}")
     
