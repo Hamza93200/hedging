@@ -5,11 +5,14 @@ import pandas as pd
 import math as mt
 
 # Helper Functions
-def convert_maturity_to_days(maturity):
+def convert_maturity_to_years(maturity):
+    """Convert maturity strings like '1w', '1M', etc., to a fraction of years."""
     if 'w' in maturity:
-        return int(maturity.replace('w', '')) * 7
+        return int(maturity.replace('w', '')) * 7 / 365
     elif 'M' in maturity:
-        return int(maturity.replace('M', '')) * 30
+        return int(maturity.replace('M', '')) * 30 / 365
+    elif 'y' in maturity:
+        return int(maturity.replace('y', ''))
     else:
         raise ValueError("Invalid maturity format. Use '1w', '1M', '3M', etc.")
 
@@ -133,7 +136,7 @@ def plot_payoffs(options):
         total_payoff += payoff
     
     plt.figure(figsize=(8, 4))
-    plt.plot(spot_prices, total_payoff, label='Total Payoff', color='black', linewidth=2, linestyle='--')
+    plt.step(spot_prices, total_payoff, label='Total Payoff', color='black', linewidth=2, linestyle='--', where='mid')
     plt.title('Options Payoff Diagram')
     plt.xlabel('Spot Price at Maturity (%)')
     plt.ylabel('Payoff (%)')
@@ -187,7 +190,7 @@ if page == "ForwardBacktesting":
     with col1:
         reward_amount = st.number_input("Reward Amount in Kind", value=1.0, min_value=0.0)
     with col2:
-        maturity = st.selectbox("Forward Maturity", options=['1w', '1M', '3M', '6M', '12M', '24M'])
+        maturity = st.selectbox("Forward Maturity", options=['1w', '1M', '3M', '6M', '12M', '24M', '36M'])
     
     if st.button("Run Hedging Strategy"):
         with st.spinner("Running hedging strategy simulation..."):
@@ -213,9 +216,12 @@ elif page == "VanillaOptionsPayoffSimulator":
         option_type = cols[0].selectbox("Option Type", options=['Call', 'Put'])
         position = cols[1].selectbox("Position", options=['Buy', 'Sell'])
         strike_price = cols[2].number_input("Strike Price (%)", value=100, min_value=0)
-        maturity = cols[3].number_input("Maturity (in years)", value=1, min_value=0)
+        maturity = cols[3].selectbox("Maturity", options=['1w', '1M', '3M', '6M', '12M', '24M', '36M'])
 
-        premium = black_scholes_price(option_type, 100, strike_price, maturity, risk_free_rate, volatility)
+        # Convert maturity to years
+        maturity_in_years = convert_maturity_to_years(maturity)
+
+        premium = black_scholes_price(option_type, 100, strike_price, maturity_in_years, risk_free_rate, volatility)
         if position == "Sell":
             premium = -premium
         
@@ -226,30 +232,39 @@ elif page == "VanillaOptionsPayoffSimulator":
                 'Strike Price': strike_price,
                 'Premium': premium,
                 'Volatility': volatility,
-                'Maturity': maturity,
+                'Maturity': maturity,  # Store the original maturity string
                 'Risk-Free Rate': risk_free_rate
             }
             st.session_state.options_data = pd.concat([st.session_state.options_data, pd.DataFrame([new_option])], ignore_index=True)
-            st.success("Option added successfully!")
+            st.experimental_rerun()
     
     # Display current option legs and the sum of premiums
     st.subheader("Current Option Legs")
     if not st.session_state.options_data.empty:
+        # Display column headers
+        cols = st.columns([1, 1, 1, 1, 1, 1, 1])
+        cols[0].write("Position")
+        cols[1].write("Type")
+        cols[2].write("Strike Price")
+        cols[3].write("Maturity")
+        cols[4].write("Volatility")
+        cols[5].write("Premium")
+        cols[6].write("Remove")
+
         for idx, option in st.session_state.options_data.iterrows():
             cols = st.columns([1, 1, 1, 1, 1, 1, 1])
             cols[0].write(option['Position'])
-            cols[1].write(1)  # Assuming quantity is 1 for simplicity
-            cols[2].write(option['Type'])
-            cols[3].write(option['Strike Price'])
-            cols[4].write(int(option['Maturity'] * 365))  # Days to expiry
-            cols[5].write(f"{option['Volatility'] * 100:.2f}%")
-            cols[6].write(f"{option['Premium']:.2f} %")
+            cols[1].write(option['Type'])
+            cols[2].write(option['Strike Price'])
+            cols[3].write(option['Maturity'])
+            cols[4].write(f"{option['Volatility'] * 100:.2f}%")
+            cols[5].write(f"{option['Premium']:.2f} %")
             remove_button = cols[6].button("❌", key=f"remove_{idx}")
 
             # Handle removal of option leg
             if remove_button:
                 st.session_state.options_data = st.session_state.options_data.drop(idx).reset_index(drop=True)
-                st.experimental_set_query_params(page="VanillaOptionsPayoffSimulator")  # Force page rerun
+                st.experimental_rerun()
 
     # Display sum of premiums
     total_premium = st.session_state.options_data['Premium'].sum()
@@ -268,31 +283,4 @@ elif page == "VanillaOptionsPayoffSimulator":
     # Handle reset action
     if st.button("Reset All Options"):
         st.session_state.options_data = pd.DataFrame(columns=['Type', 'Position', 'Strike Price', 'Premium', 'Volatility', 'Maturity', 'Risk-Free Rate'])
-        st.experimental_set_query_params(page="VanillaOptionsPayoffSimulator")  # Force page rerun
-
-# Improved `plot_payoffs` function
-def plot_payoffs(options):
-    if options.empty:
-        return  # Early exit if no options are present
-    
-    spot_prices = np.linspace(50, 150, 500)  # Adjusted range centered on 100%
-    total_payoff = np.zeros_like(spot_prices)
-    
-    for _, option in options.iterrows():
-        payoff = calculate_option_payoff(
-            option_type=option['Type'],
-            is_bought=option['Position'] == 'Buy',
-            strike_price=option['Strike Price'],
-            spot_prices=spot_prices,
-            premium=option['Premium']
-        )
-        total_payoff += payoff
-    
-    plt.figure(figsize=(8, 4))
-    plt.step(spot_prices, total_payoff, label='Total Payoff', color='black', linewidth=2, linestyle='--', where='mid')
-    plt.title('Options Payoff Diagram')
-    plt.xlabel('Spot Price at Maturity (%)')
-    plt.ylabel('Payoff (%)')
-    plt.legend()
-    plt.grid(True)
-    st.pyplot(plt)
+        st.experimental_rerun()
