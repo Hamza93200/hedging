@@ -92,7 +92,7 @@ def hedge_strategy_corrected(df, start_date, rewards_frequency, reward_amount, m
     st.subheader("Results")
     st.write(f"**Final accumulated notional with spot strategy:** {final_spot_notional} USD")
     st.write(f"**Final accumulated notional with forward strategy:** {final_forward_notional} USD")
-    st.write(f"**Difference between forward and spot strategies:** {difference} USD")
+    st.write(f"**Difference between forward and spot strategies (your gain/loss):** {difference} USD")
     st.write(f"**Return of forward strategy relative to spot:** {returns:.2%}")
     
     return df
