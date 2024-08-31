@@ -212,7 +212,7 @@ elif page == "VanillaOptionsPayoffSimulator":
         cols = st.columns(4)
         option_type = cols[0].selectbox("Option Type", options=['Call', 'Put'])
         position = cols[1].selectbox("Position", options=['Buy', 'Sell'])
-        strike_price = cols[2].number_input("Strike Price (%)", value=100.0, min_value=0.0)
+        strike_price = cols[2].number_input("Strike Price (%)", value=100, min_value=0)
         maturity = cols[3].number_input("Maturity (in years)", value=1.0, min_value=0.01, format="%.2f")
 
         premium = black_scholes_price(option_type, 100, strike_price, maturity, risk_free_rate, volatility)
@@ -253,7 +253,7 @@ elif page == "VanillaOptionsPayoffSimulator":
 
     # Display sum of premiums
     total_premium = st.session_state.options_data['Premium'].sum()
-    st.write(f"**Total Premium:** {total_premium:.2f} USD")
+    st.write(f"**Total Premium:** {total_premium:.2f} %")
 
     # Separate the current options and plot sections
     st.markdown("---")
