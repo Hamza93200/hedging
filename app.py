@@ -193,6 +193,7 @@ if page == "ForwardBacktesting":
         with st.spinner("Running hedging strategy simulation..."):
             hedged_df_corrected = hedge_strategy_corrected(hp_df, start_date, rewards_frequency, reward_amount, maturity, asset)
             plot_results_adjusted(hedged_df_corrected, asset)
+
 elif page == "VanillaOptionsPayoffSimulator":
     st.title("Vanilla Options Payoff Simulator")
     
@@ -211,15 +212,7 @@ elif page == "VanillaOptionsPayoffSimulator":
         cols = st.columns(4)
         option_type = cols[0].selectbox("Option Type", options=['Call', 'Put'])
         position = cols[1].selectbox("Position", options=['Buy', 'Sell'])
-        
-        # Handle Strike Price increment
-        strike_price = st.session_state.get('strike_price', 100.0)
-        strike_display = cols[2].write(f"Strike Price: {strike_price:.2f} %")
-        if cols[2].button("+10", key="increment_strike"):
-            strike_price += 10
-            st.session_state['strike_price'] = strike_price
-            st.experimental_rerun()
-
+        strike_price = cols[2].number_input("Strike Price (%)", value=100.0, min_value=0.0)
         maturity = cols[3].number_input("Maturity (in years)", value=1.0, min_value=0.01, format="%.2f")
 
         premium = black_scholes_price(option_type, 100, strike_price, maturity, risk_free_rate, volatility)
@@ -237,8 +230,7 @@ elif page == "VanillaOptionsPayoffSimulator":
                 'Risk-Free Rate': risk_free_rate
             }
             st.session_state.options_data = pd.concat([st.session_state.options_data, pd.DataFrame([new_option])], ignore_index=True)
-            st.experimental_set_query_params(update="true")
-            st.experimental_rerun()
+            st.success("Option added successfully!")
     
     # Display current option legs and the sum of premiums
     st.subheader("Current Option Legs")
@@ -257,8 +249,7 @@ elif page == "VanillaOptionsPayoffSimulator":
             # Handle removal of option leg
             if remove_button:
                 st.session_state.options_data = st.session_state.options_data.drop(idx).reset_index(drop=True)
-                st.experimental_set_query_params(update="true")
-                st.experimental_rerun()
+                st.experimental_set_query_params(page="VanillaOptionsPayoffSimulator")  # Force page rerun
 
     # Display sum of premiums
     total_premium = st.session_state.options_data['Premium'].sum()
@@ -277,8 +268,7 @@ elif page == "VanillaOptionsPayoffSimulator":
     # Handle reset action
     if st.button("Reset All Options"):
         st.session_state.options_data = pd.DataFrame(columns=['Type', 'Position', 'Strike Price', 'Premium', 'Volatility', 'Maturity', 'Risk-Free Rate'])
-        st.experimental_set_query_params(update="true")
-        st.experimental_rerun()
+        st.experimental_set_query_params(page="VanillaOptionsPayoffSimulator")  # Force page rerun
 
 # Improved `plot_payoffs` function
 def plot_payoffs(options):
@@ -306,4 +296,3 @@ def plot_payoffs(options):
     plt.legend()
     plt.grid(True)
     st.pyplot(plt)
-
