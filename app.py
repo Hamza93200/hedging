@@ -16,6 +16,17 @@ def convert_maturity_to_years(maturity):
     else:
         raise ValueError("Invalid maturity format. Use '1w', '1M', '3M', etc.")
 
+def convert_maturity_to_days(maturity):
+    """Convert maturity strings like '1w', '1M', etc., to days."""
+    if 'w' in maturity:
+        return int(maturity.replace('w', '')) * 7
+    elif 'M' in maturity:
+        return int(maturity.replace('M', '')) * 30
+    elif 'y' in maturity:
+        return int(maturity.replace('y', '')) * 365
+    else:
+        raise ValueError("Invalid maturity format. Use '1w', '1M', '3M', etc.")
+
 def calculate_forward_price_fixed(df, asset, maturity_days, annual_rate=0.05):
     forward_col = f'Forward Price ({asset})'
     spot_col = asset
@@ -107,7 +118,6 @@ def plot_results_adjusted(df, asset):
     ax.grid(True)
     st.pyplot(fig)
 
-# Function to calculate and plot payoff for vanilla options
 def calculate_option_payoff(option_type, is_bought, strike_price, spot_prices, premium):
     if option_type == 'Call':
         intrinsic_values = np.maximum(spot_prices - strike_price, 0)
