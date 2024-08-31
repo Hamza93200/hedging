@@ -213,7 +213,7 @@ elif page == "VanillaOptionsPayoffSimulator":
         option_type = cols[0].selectbox("Option Type", options=['Call', 'Put'])
         position = cols[1].selectbox("Position", options=['Buy', 'Sell'])
         strike_price = cols[2].number_input("Strike Price (%)", value=100, min_value=0)
-        maturity = cols[3].number_input("Maturity (in years)", value=1, min_value=0, format="%.2f")
+        maturity = cols[3].number_input("Maturity (in years)", value=1, min_value=0)
 
         premium = black_scholes_price(option_type, 100, strike_price, maturity, risk_free_rate, volatility)
         if position == "Sell":
