@@ -236,8 +236,8 @@ elif page == "VanillaOptionsPayoffSimulator":
                 'Risk-Free Rate': risk_free_rate
             }
             st.session_state.options_data = pd.concat([st.session_state.options_data, pd.DataFrame([new_option])], ignore_index=True)
-            st.experimental_rerun()
-    
+            st.experimental_set_query_params(update="true")
+
     # Display current option legs and the sum of premiums
     st.subheader("Current Option Legs")
     if not st.session_state.options_data.empty:
@@ -264,7 +264,7 @@ elif page == "VanillaOptionsPayoffSimulator":
             # Handle removal of option leg
             if remove_button:
                 st.session_state.options_data = st.session_state.options_data.drop(idx).reset_index(drop=True)
-                st.experimental_rerun()
+                st.experimental_set_query_params(update="true")
 
     # Display sum of premiums
     total_premium = st.session_state.options_data['Premium'].sum()
@@ -283,4 +283,4 @@ elif page == "VanillaOptionsPayoffSimulator":
     # Handle reset action
     if st.button("Reset All Options"):
         st.session_state.options_data = pd.DataFrame(columns=['Type', 'Position', 'Strike Price', 'Premium', 'Volatility', 'Maturity', 'Risk-Free Rate'])
-        st.experimental_rerun()
+        st.experimental_set_query_params(update="true")
