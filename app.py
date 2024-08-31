@@ -213,7 +213,7 @@ elif page == "VanillaOptionsPayoffSimulator":
         option_type = cols[0].selectbox("Option Type", options=['Call', 'Put'])
         position = cols[1].selectbox("Position", options=['Buy', 'Sell'])
         strike_price = cols[2].number_input("Strike Price (%)", value=100, min_value=0)
-        maturity = cols[3].number_input("Maturity (in years)", value=1.0, min_value=0.01, format="%.2f")
+        maturity = cols[3].number_input("Maturity (in years)", value=1, min_value=0, format="%.2f")
 
         premium = black_scholes_price(option_type, 100, strike_price, maturity, risk_free_rate, volatility)
         if position == "Sell":
@@ -243,7 +243,7 @@ elif page == "VanillaOptionsPayoffSimulator":
             cols[3].write(option['Strike Price'])
             cols[4].write(int(option['Maturity'] * 365))  # Days to expiry
             cols[5].write(f"{option['Volatility'] * 100:.2f}%")
-            cols[6].write(f"{option['Premium']:.2f} USD")
+            cols[6].write(f"{option['Premium']:.2f} %")
             remove_button = cols[6].button("❌", key=f"remove_{idx}")
 
             # Handle removal of option leg
