@@ -98,7 +98,7 @@ def hedge_strategy_corrected(df, start_date, rewards_frequency, reward_amount, m
     return df
 
 def plot_results_adjusted(df, asset, rewards_frequency):
-    st.subheader("Spot vs Forward Prices at Exchange Dates")
+    st.subheader("Spot vs Forward Prices and PnL at Exchange Dates")
     
     # Determine the reward interval based on frequency
     reward_interval = {'Daily': 1, 'Weekly': 7, 'Monthly': 30}[rewards_frequency]
@@ -110,7 +110,10 @@ def plot_results_adjusted(df, asset, rewards_frequency):
     spot_prices_at_exchanges = df.loc[exchange_dates.index, asset]
     forward_prices_at_exchanges = df.loc[exchange_dates.index, f'Forward Price ({asset})']
     
-    # Plotting the data
+    # Calculate the PnL at each exchange date
+    pnl_at_exchanges = (forward_prices_at_exchanges - spot_prices_at_exchanges) * df.loc[exchange_dates.index, f'Notional Exchanged Spot ({asset})']
+    
+    # Plotting the Spot vs Forward Prices
     fig, ax = plt.subplots(figsize=(8, 4))
     ax.plot(exchange_dates, spot_prices_at_exchanges, marker='', linestyle='-', color='blue', label='Spot Price at Exchange')
     ax.plot(exchange_dates, forward_prices_at_exchanges, marker='', linestyle='--', color='orange', label='Forward Price at Exchange')
@@ -118,8 +121,18 @@ def plot_results_adjusted(df, asset, rewards_frequency):
     ax.set_ylabel('Price')
     ax.legend()
     ax.grid(True)
-    
     st.pyplot(fig)
+    
+    # Plotting the PnL
+    st.subheader("PnL at Exchange Dates")
+    fig, ax = plt.subplots(figsize=(8, 4))
+    ax.plot(exchange_dates, pnl_at_exchanges, marker='o', linestyle='-', color='green', label='PnL at Exchange')
+    ax.set_xlabel('Date')
+    ax.set_ylabel('PnL (USD)')
+    ax.legend()
+    ax.grid(True)
+    st.pyplot(fig)
+
 
 
 def calculate_option_payoff(option_type, is_bought, strike_price, spot_prices, premium):
