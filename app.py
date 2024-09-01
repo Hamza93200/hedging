@@ -250,7 +250,7 @@ elif page == "VanillaOptionsPayoffSimulator":
     
         # Calculate the premium in percentage terms
         premium_percentage = black_scholes_price(option_type, 100, strike_price, maturity_in_years, risk_free_rate, volatility)
-        if position == "Sell":
+        if position == "Buy":
             premium_percentage = -premium_percentage
         
         if st.form_submit_button(label="Add Option"):
