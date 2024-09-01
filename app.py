@@ -169,17 +169,15 @@ def black_scholes_price(option_type, S, K, T, r, sigma):
 st.set_page_config(page_title="Decimal Hedge - Strategies Simulator", layout="centered")
 
 # Sidebar Navigation
+st.sidebar.title("Decimal Hedge")
+if st.sidebar.button("Forward Backtesting"):
+    st.experimental_set_query_params(page="ForwardBacktesting")
+if st.sidebar.button("Vanilla Options Payoff Simulator"):
+    st.experimental_set_query_params(page="VanillaOptionsPayoffSimulator")
+
+# Determine which page to show based on the query parameter
 query_params = st.experimental_get_query_params()
 page = query_params.get("page", ["ForwardBacktesting"])[0]
-
-if page == "ForwardBacktesting":
-    st.sidebar.title("Navigation")
-    if st.sidebar.button("Vanilla Options Payoff Simulator"):
-        st.experimental_set_query_params(page="VanillaOptionsPayoffSimulator")
-elif page == "VanillaOptionsPayoffSimulator":
-    st.sidebar.title("Navigation")
-    if st.sidebar.button("Forward Backtesting"):
-        st.experimental_set_query_params(page="ForwardBacktesting")
 
 # Main Page Rendering
 if page == "ForwardBacktesting":
