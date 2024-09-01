@@ -84,16 +84,16 @@ def hedge_strategy_corrected(df, start_date, rewards_frequency, reward_amount, m
         df.loc[df.index[-1], f'Notional Exchanged Forward ({asset})'] += forward_accumulation * final_forward_price
         df.loc[df.index[-1], f'Cumulative Forward ({asset})'] += forward_accumulation * final_forward_price
     
-    final_spot_notional = round(df[f'Cumulative Spot ({asset})'].iloc[-1])
-    final_forward_notional = round(df[f'Cumulative Forward ({asset})'].iloc[-1])
-    difference = final_forward_notional - final_spot_notional
-    returns = final_forward_notional / final_spot_notional - 1
+    final_spot_notional = f"{round(df[f'Cumulative Spot ({asset})'].iloc[-1]):,}"
+    final_forward_notional = f"{round(df[f'Cumulative Forward ({asset})'].iloc[-1]):,}"
+    difference = f"{int(final_forward_notional.replace(',', '')) - int(final_spot_notional.replace(',', '')):,}"
+    returns = (int(final_forward_notional.replace(',', '')) / int(final_spot_notional.replace(',', '')) - 1) * 100
     
     st.subheader("Results")
     st.write(f"**Final accumulated notional with spot strategy:** {final_spot_notional} USD")
     st.write(f"**Final accumulated notional with forward strategy:** {final_forward_notional} USD")
-    st.write(f"**Difference between forward and spot strategies (your gain/loss):** {difference} USD")
-    st.write(f"**Return of forward strategy relative to spot:** {returns:.2%}")
+    st.write(f"**Difference between forward and spot strategies:** {difference} USD")
+    st.write(f"**Return of forward strategy relative to spot:** {returns:.2f}%")
     
     return df
 
@@ -111,7 +111,7 @@ def plot_results_adjusted(df, asset):
     st.subheader("Cumulative Notional Exchanged Over Time")
     fig, ax = plt.subplots(figsize=(8, 4))
     ax.plot(df['Date'], df[f'Cumulative Spot ({asset})'], label=f'Cumulative Spot Notional ({asset})', color='green')
-    ax.plot(df['Date'], df[f'Cumulative Forward ({asset})'], label=f'Cumulative Forward Notional ({asset})', color='red')
+    ax.plot(df['Date'], df[f'Cumulative Forward ({asset})'], label=f'Cumulative Forward Notional ({asset})'], color='red')
     ax.set_xlabel('Date')
     ax.set_ylabel('Cumulative Notional Value')
     ax.legend()
@@ -168,18 +168,34 @@ def black_scholes_price(option_type, S, K, T, r, sigma):
 # Streamlit App Interface
 st.set_page_config(page_title="Decimal Hedge - Strategies Simulator", layout="centered")
 
-st.sidebar.title("DECIMAL HEDGE - STRATEGIES SIMULATOR")
-if st.sidebar.button("Forward Backtesting"):
-    st.experimental_set_query_params(page="ForwardBacktesting")
-if st.sidebar.button("Vanilla Options Payoff Simulator"):
-    st.experimental_set_query_params(page="VanillaOptionsPayoffSimulator")
-
+# Sidebar Navigation
 query_params = st.experimental_get_query_params()
 page = query_params.get("page", ["ForwardBacktesting"])[0]
 
 if page == "ForwardBacktesting":
+    st.sidebar.title("Navigation")
+    if st.sidebar.button("Vanilla Options Payoff Simulator"):
+        st.experimental_set_query_params(page="VanillaOptionsPayoffSimulator")
+elif page == "VanillaOptionsPayoffSimulator":
+    st.sidebar.title("Navigation")
+    if st.sidebar.button("Forward Backtesting"):
+        st.experimental_set_query_params(page="ForwardBacktesting")
+
+# Main Page Rendering
+if page == "ForwardBacktesting":
     st.title("Forward Backtesting")
     
+    # Explanation of the Forward Backtesting Strategy
+    st.markdown("""
+    In this simulation, we aim to compare the effectiveness of using a spot strategy versus a forward strategy over a specified period. 
+    A spot strategy involves exchanging the asset at its current market price (spot price) at regular intervals, while a forward strategy 
+    locks in a future price (forward price) today for delivery at a later date. By backtesting these strategies on historical data, 
+    we can determine which approach yields better financial results.
+    
+    You can customize the parameters of the simulation, such as the start date, the frequency of rewards, and the maturity of the forward 
+    contracts, to see how different strategies would have performed.
+    """)
+
     # Load data from GitHub
     github_url = 'https://raw.githubusercontent.com/hamza93200/hedging/main/HP.xlsx'
     try:
@@ -200,7 +216,7 @@ if page == "ForwardBacktesting":
     with col1:
         reward_amount = st.number_input("Reward Amount in Kind", value=1.0, min_value=0.0)
     with col2:
-        maturity = st.selectbox("Forward Maturity", options=['1w', '1M', '3M', '6M', '12M', '24M', '36M'])
+        maturity = st.selectbox("Forward Maturity", options=['1w', '1M', '3M', '6M', '12M', '24M', '36M'], index=4)  # Default to '12M'
     
     if st.button("Run Hedging Strategy"):
         with st.spinner("Running hedging strategy simulation..."):
@@ -246,7 +262,6 @@ elif page == "VanillaOptionsPayoffSimulator":
                 'Risk-Free Rate': risk_free_rate
             }
             st.session_state.options_data = pd.concat([st.session_state.options_data, pd.DataFrame([new_option])], ignore_index=True)
-            st.experimental_set_query_params(update="true")
 
     # Display current option legs and the sum of premiums
     st.subheader("Current Option Legs")
@@ -274,14 +289,10 @@ elif page == "VanillaOptionsPayoffSimulator":
             # Handle removal of option leg
             if remove_button:
                 st.session_state.options_data = st.session_state.options_data.drop(idx).reset_index(drop=True)
-                st.experimental_set_query_params(update="true")
 
     # Display sum of premiums
     total_premium = st.session_state.options_data['Premium'].sum()
     st.write(f"**Total Premium:** {total_premium:.2f} %")
-
-    # Separate the current options and plot sections
-    st.markdown("---")
 
     # Improved plotting section
     st.subheader("Options Payoff Diagram")
@@ -293,4 +304,3 @@ elif page == "VanillaOptionsPayoffSimulator":
     # Handle reset action
     if st.button("Reset All Options"):
         st.session_state.options_data = pd.DataFrame(columns=['Type', 'Position', 'Strike Price', 'Premium', 'Volatility', 'Maturity', 'Risk-Free Rate'])
-        st.experimental_set_query_params(update="true")
