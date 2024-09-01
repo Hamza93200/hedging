@@ -111,7 +111,7 @@ def plot_results_adjusted(df, asset):
     st.subheader("Cumulative Notional Exchanged Over Time")
     fig, ax = plt.subplots(figsize=(8, 4))
     ax.plot(df['Date'], df[f'Cumulative Spot ({asset})'], label=f'Cumulative Spot Notional ({asset})', color='green')
-    ax.plot(df['Date'], df[f'Cumulative Forward ({asset})'], label=f'Cumulative Forward Notional ({asset})'], color='red')
+    ax.plot(df['Date'], df[f'Cumulative Forward ({asset})'], label=f'Cumulative Forward Notional ({asset})', color='red')
     ax.set_xlabel('Date')
     ax.set_ylabel('Cumulative Notional Value')
     ax.legend()
