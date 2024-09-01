@@ -56,6 +56,7 @@ def hedge_strategy_corrected(df, start_date, rewards_frequency, reward_amount, m
     df[f'Notional Exchanged Spot ({asset})'] = 0.0
     df[f'Cumulative Forward ({asset})'] = 0.0
     df[f'Cumulative Spot ({asset})'] = 0.0
+    df[f'PnL ({asset})'] = 0.0  # Initialize PnL column
     
     reward_interval = {'Daily': 1, 'Weekly': 7, 'Monthly': 30}[rewards_frequency]
     forward_accumulation = 0
@@ -63,18 +64,31 @@ def hedge_strategy_corrected(df, start_date, rewards_frequency, reward_amount, m
     
     for i in range(len(df)):
         if i % reward_interval == 0:
-            df.loc[df.index[i], f'Notional Exchanged Spot ({asset})'] = df.loc[df.index[i], asset] * reward_amount
+            spot_price = df.loc[df.index[i], asset]
+            forward_price = df.loc[df.index[last_maturity_date], f'Forward Price ({asset})'] if i >= maturity_period else spot_price
+            
+            # Calculate notional exchanged at the spot price
+            df.loc[df.index[i], f'Notional Exchanged Spot ({asset})'] = spot_price * reward_amount
             forward_accumulation += reward_amount
+            
+            # Calculate PnL
+            if i >= maturity_period:
+                df.loc[df.index[i], f'PnL ({asset})'] = (forward_price - spot_price) * reward_amount
+            
+            # Check if it's time to exchange at forward price
             if i - last_maturity_date >= maturity_period and i + maturity_period < len(df):
-                df.loc[df.index[i + maturity_period], f'Notional Exchanged Forward ({asset})'] += (
-                    df.loc[df.index[last_maturity_date], f'Forward Price ({asset})'] * forward_accumulation
-                )
+                df.loc[df.index[i + maturity_period], f'Notional Exchanged Forward ({asset})'] += forward_price * forward_accumulation
                 forward_accumulation = 0
                 last_maturity_date = i
-
+        
+        # Update cumulative values
         if i > 0:
-            df.loc[df.index[i], f'Cumulative Spot ({asset})'] = df.loc[df.index[i-1], f'Cumulative Spot ({asset})'] + df.loc[df.index[i], f'Notional Exchanged Spot ({asset})']
-            df.loc[df.index[i], f'Cumulative Forward ({asset})'] = df.loc[df.index[i-1], f'Cumulative Forward ({asset})'] + df.loc[df.index[i], f'Notional Exchanged Forward ({asset})']
+            df.loc[df.index[i], f'Cumulative Spot ({asset})'] = (
+                df.loc[df.index[i-1], f'Cumulative Spot ({asset})'] + df.loc[df.index[i], f'Notional Exchanged Spot ({asset})']
+            )
+            df.loc[df.index[i], f'Cumulative Forward ({asset})'] = (
+                df.loc[df.index[i-1], f'Cumulative Forward ({asset})'] + df.loc[df.index[i], f'Notional Exchanged Forward ({asset})']
+            )
         else:
             df.loc[df.index[i], f'Cumulative Spot ({asset})'] = df.loc[df.index[i], f'Notional Exchanged Spot ({asset})']
             df.loc[df.index[i], f'Cumulative Forward ({asset})'] = df.loc[df.index[i], f'Notional Exchanged Forward ({asset})']
@@ -97,6 +111,7 @@ def hedge_strategy_corrected(df, start_date, rewards_frequency, reward_amount, m
     
     return df
 
+
 def plot_results_adjusted(df, asset, rewards_frequency):
     st.subheader("Spot vs Forward Prices and PnL at Exchange Dates")
     
@@ -110,13 +125,13 @@ def plot_results_adjusted(df, asset, rewards_frequency):
     spot_prices_at_exchanges = df.loc[exchange_dates.index, asset]
     forward_prices_at_exchanges = df.loc[exchange_dates.index, f'Forward Price ({asset})']
     
-    # Calculate the PnL at each exchange date
-    pnl_at_exchanges = (forward_prices_at_exchanges - spot_prices_at_exchanges) * df.loc[exchange_dates.index, f'Notional Exchanged Spot ({asset})']
+    # Extract the PnL at each exchange date
+    pnl_at_exchanges = df.loc[exchange_dates.index, f'PnL ({asset})']
     
     # Plotting the Spot vs Forward Prices
     fig, ax = plt.subplots(figsize=(8, 4))
-    ax.plot(exchange_dates, spot_prices_at_exchanges, marker='', linestyle='-', color='blue', label='Spot Price at Exchange')
-    ax.plot(exchange_dates, forward_prices_at_exchanges, marker='', linestyle='--', color='orange', label='Forward Price at Exchange')
+    ax.plot(exchange_dates, spot_prices_at_exchanges, marker='o', linestyle='-', color='blue', label='Spot Price at Exchange')
+    ax.plot(exchange_dates, forward_prices_at_exchanges, marker='o', linestyle='--', color='orange', label='Forward Price at Exchange')
     ax.set_xlabel('Date')
     ax.set_ylabel('Price')
     ax.legend()
