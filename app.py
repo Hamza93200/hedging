@@ -97,26 +97,30 @@ def hedge_strategy_corrected(df, start_date, rewards_frequency, reward_amount, m
     
     return df
 
-def plot_results_adjusted(df, asset):
-    st.subheader("Spot vs Forward Prices Over Time")
+def plot_results_adjusted(df, asset, rewards_frequency):
+    st.subheader("Spot vs Forward Prices at Exchange Dates")
+    
+    # Determine the reward interval based on frequency
+    reward_interval = {'Daily': 1, 'Weekly': 7, 'Monthly': 30}[rewards_frequency]
+    
+    # Extract the dates where exchanges occurred
+    exchange_dates = df[df.index % reward_interval == 0]['Date']
+    
+    # Extract the corresponding spot and forward prices at those dates
+    spot_prices_at_exchanges = df.loc[exchange_dates.index, asset]
+    forward_prices_at_exchanges = df.loc[exchange_dates.index, f'Forward Price ({asset})']
+    
+    # Plotting the data
     fig, ax = plt.subplots(figsize=(8, 4))
-    ax.plot(df['Date'], df[asset], label=f'{asset} Spot Price', color='blue')
-    ax.plot(df['Date'], df[f'Forward Price ({asset})'], label=f'{asset} Forward Price', linestyle='--', color='orange')
+    ax.plot(exchange_dates, spot_prices_at_exchanges, marker='o', linestyle='-', color='blue', label='Spot Price at Exchange')
+    ax.plot(exchange_dates, forward_prices_at_exchanges, marker='o', linestyle='--', color='orange', label='Forward Price at Exchange')
     ax.set_xlabel('Date')
     ax.set_ylabel('Price')
     ax.legend()
     ax.grid(True)
-    st.pyplot(fig)
     
-    st.subheader("Cumulative Notional Exchanged Over Time")
-    fig, ax = plt.subplots(figsize=(8, 4))
-    ax.plot(df['Date'], df[f'Cumulative Spot ({asset})'], label=f'Cumulative Spot Notional ({asset})', color='green')
-    ax.plot(df['Date'], df[f'Cumulative Forward ({asset})'], label=f'Cumulative Forward Notional ({asset})', color='red')
-    ax.set_xlabel('Date')
-    ax.set_ylabel('Cumulative Notional Value')
-    ax.legend()
-    ax.grid(True)
     st.pyplot(fig)
+
 
 def calculate_option_payoff(option_type, is_bought, strike_price, spot_prices, premium):
     if option_type == 'Call':
@@ -235,7 +239,8 @@ elif page == "ForwardBacktesting":
     if st.button("Run Hedging Strategy"):
         with st.spinner("Running hedging strategy simulation..."):
             hedged_df_corrected = hedge_strategy_corrected(hp_df, start_date, rewards_frequency, reward_amount, maturity, asset)
-            plot_results_adjusted(hedged_df_corrected, asset)
+            plot_results_adjusted(hedged_df_corrected, asset, rewards_frequency)
+
 
 elif page == "VanillaOptionsPayoffSimulator":
     st.title("Vanilla Options Payoff Simulator")
