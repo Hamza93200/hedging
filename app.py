@@ -112,8 +112,8 @@ def plot_results_adjusted(df, asset, rewards_frequency):
     
     # Plotting the data
     fig, ax = plt.subplots(figsize=(8, 4))
-    ax.plot(exchange_dates, spot_prices_at_exchanges, marker='o', linestyle='-', color='blue', label='Spot Price at Exchange')
-    ax.plot(exchange_dates, forward_prices_at_exchanges, marker='o', linestyle='--', color='orange', label='Forward Price at Exchange')
+    ax.plot(exchange_dates, spot_prices_at_exchanges, marker='', linestyle='-', color='blue', label='Spot Price at Exchange')
+    ax.plot(exchange_dates, forward_prices_at_exchanges, marker='', linestyle='--', color='orange', label='Forward Price at Exchange')
     ax.set_xlabel('Date')
     ax.set_ylabel('Price')
     ax.legend()
