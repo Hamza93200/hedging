@@ -173,6 +173,8 @@ st.set_page_config(page_title="Decimal Hedge - Strategies Simulator", layout="ce
 
 # Sidebar Navigation
 st.sidebar.title("Decimal Hedge")
+if st.sidebar.button("Home"):
+    st.experimental_set_query_params(page="Home")
 if st.sidebar.button("Forward Backtesting"):
     st.experimental_set_query_params(page="ForwardBacktesting")
 if st.sidebar.button("Vanilla Options Payoff Simulator"):
@@ -180,10 +182,21 @@ if st.sidebar.button("Vanilla Options Payoff Simulator"):
 
 # Determine which page to show based on the query parameter
 query_params = st.experimental_get_query_params()
-page = query_params.get("page", ["ForwardBacktesting"])[0]
+page = query_params.get("page", ["Home"])[0]
 
 # Main Page Rendering
-if page == "ForwardBacktesting":
+if page == "Home":
+    st.title("Welcome to Decimal Hedge Strategies Simulator")
+    st.markdown("""
+    This application is designed to help our clients better understand the financial aspects of hedging their cryptocurrency assets.
+    We offer various strategies that can be simulated to visualize potential outcomes and compare different hedging techniques.
+    
+    Explore the tools provided in this application to see how you can mitigate risks and optimize your returns in the volatile world of crypto.
+    
+    **Choose a strategy** from the sidebar to get started.
+    """)
+
+elif page == "ForwardBacktesting":
     st.title("Forward Backtesting")
     
     # Explanation of the Forward Backtesting Strategy
@@ -226,7 +239,14 @@ if page == "ForwardBacktesting":
 
 elif page == "VanillaOptionsPayoffSimulator":
     st.title("Vanilla Options Payoff Simulator")
+    st.markdown("""
+    The Vanilla Options Payoff Simulator allows you to create and visualize different option strategies.
+    You can add different option legs, specify their strike prices, maturities, and whether you are buying or selling them.
     
+    This tool will calculate the premiums as a percentage of the current spot price and plot the combined payoff diagram for all the options you've added.
+    This can help you better understand the potential outcomes of your strategies at different spot prices at maturity.
+    """)
+
     if 'options_data' not in st.session_state:
         st.session_state.options_data = pd.DataFrame(columns=['Type', 'Position', 'Strike Price', 'Premium', 'Volatility', 'Maturity', 'Risk-Free Rate'])
     
@@ -244,13 +264,12 @@ elif page == "VanillaOptionsPayoffSimulator":
         position = cols[1].selectbox("Position", options=['Buy', 'Sell'])
         strike_price = cols[2].number_input("Strike Price (%)", value=100, min_value=0)
         maturity = cols[3].selectbox("Maturity", options=['1w', '1M', '3M', '6M', '12M', '24M', '36M'])
-    
+
         # Convert maturity to years
         maturity_in_years = convert_maturity_to_years(maturity)
-    
-        # Calculate the premium in percentage terms
+
         premium_percentage = black_scholes_price(option_type, 100, strike_price, maturity_in_years, risk_free_rate, volatility)
-        if position == "Buy":
+        if position == "Sell":
             premium_percentage = -premium_percentage
         
         if st.form_submit_button(label="Add Option"):
