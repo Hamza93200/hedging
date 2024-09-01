@@ -202,11 +202,11 @@ elif page == "ForwardBacktesting":
     # Explanation of the Forward Backtesting Strategy
     st.markdown("""
     In this simulation, we aim to compare the effectiveness of using a spot strategy versus a forward strategy over a specified period. 
-    A spot strategy involves exchanging the asset at its current market price (spot price) at regular intervals, while a forward strategy 
-    locks in a future price (forward price) today for delivery at a later date. By backtesting these strategies on historical data, 
-    we can determine which approach yields better financial results.
+    A spot strategy involves exchanging the asset at its current market price (spot price) when rewards are claimed, while a forward strategy 
+    locks-in a future price (forward price) today for delivery at a later date. By backtesting these strategies on historical data, 
+    we can determine the Pnl you could reach by using a forward hedging strategy.
     
-    You can customize the parameters of the simulation, such as the start date, the frequency of rewards, and the maturity of the forward 
+    You can customize the parameters of the simulation, such as the Hedge start date, the frequency of rewards, and the maturity of the forward 
     contracts, to see how different strategies would have performed.
     """)
 
@@ -220,7 +220,7 @@ elif page == "ForwardBacktesting":
     st.subheader("Input Parameters")
     col1, col2, col3 = st.columns(3)
     with col1:
-        start_date = st.date_input("Start Date", value=pd.to_datetime("2018-03-01"))
+        start_date = st.date_input("Hedge start date", value=pd.to_datetime("2018-03-01"))
     with col2:
         rewards_frequency = st.selectbox("Rewards Frequency", options=['Daily', 'Weekly', 'Monthly'])
     with col3:
