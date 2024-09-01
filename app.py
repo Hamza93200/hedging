@@ -239,31 +239,31 @@ elif page == "VanillaOptionsPayoffSimulator":
     
     st.subheader("Add New Option Leg")
     with st.form(key='option_form'):
-    cols = st.columns(4)
-    option_type = cols[0].selectbox("Option Type", options=['Call', 'Put'])
-    position = cols[1].selectbox("Position", options=['Buy', 'Sell'])
-    strike_price = cols[2].number_input("Strike Price (%)", value=100, min_value=0)
-    maturity = cols[3].selectbox("Maturity", options=['1w', '1M', '3M', '6M', '12M', '24M', '36M'])
-
-    # Convert maturity to years
-    maturity_in_years = convert_maturity_to_years(maturity)
-
-    # Calculate the premium in percentage terms
-    premium_percentage = black_scholes_price(option_type, 100, strike_price, maturity_in_years, risk_free_rate, volatility)
-    if position == "Sell":
-        premium_percentage = -premium_percentage
+        cols = st.columns(4)
+        option_type = cols[0].selectbox("Option Type", options=['Call', 'Put'])
+        position = cols[1].selectbox("Position", options=['Buy', 'Sell'])
+        strike_price = cols[2].number_input("Strike Price (%)", value=100, min_value=0)
+        maturity = cols[3].selectbox("Maturity", options=['1w', '1M', '3M', '6M', '12M', '24M', '36M'])
     
-    if st.form_submit_button(label="Add Option"):
-        new_option = {
-            'Type': option_type,
-            'Position': position,
-            'Strike Price': strike_price,
-            'Premium': premium_percentage,  # Premium as a percentage
-            'Volatility': volatility,
-            'Maturity': maturity,  # Store the original maturity string
-            'Risk-Free Rate': risk_free_rate
-        }
-        st.session_state.options_data = pd.concat([st.session_state.options_data, pd.DataFrame([new_option])], ignore_index=True)
+        # Convert maturity to years
+        maturity_in_years = convert_maturity_to_years(maturity)
+    
+        # Calculate the premium in percentage terms
+        premium_percentage = black_scholes_price(option_type, 100, strike_price, maturity_in_years, risk_free_rate, volatility)
+        if position == "Sell":
+            premium_percentage = -premium_percentage
+        
+        if st.form_submit_button(label="Add Option"):
+            new_option = {
+                'Type': option_type,
+                'Position': position,
+                'Strike Price': strike_price,
+                'Premium': premium_percentage,  # Premium as a percentage
+                'Volatility': volatility,
+                'Maturity': maturity,  # Store the original maturity string
+                'Risk-Free Rate': risk_free_rate
+            }
+            st.session_state.options_data = pd.concat([st.session_state.options_data, pd.DataFrame([new_option])], ignore_index=True)
 
     # Display current option legs and the sum of premiums
     st.subheader("Current Option Legs")
