@@ -201,34 +201,22 @@ def black_scholes_price(option_type, S, K, T, r, sigma):
     return premium_percentage
 
 # Streamlit App Interface
-st.set_page_config(page_title="Decimal Hedge - Strategies Simulator", layout="centered")
+st.set_page_config(page_title="Kiln - Hedging", layout="centered")
 
 # Sidebar Navigation
-st.sidebar.title("Decimal Hedge")
-if st.sidebar.button("Home"):
-    st.experimental_set_query_params(page="Home")
-if st.sidebar.button("Forward Backtesting"):
-    st.experimental_set_query_params(page="ForwardBacktesting")
+st.sidebar.title("Kiln hedging strats")
 if st.sidebar.button("Vanilla Options Payoff Simulator"):
     st.experimental_set_query_params(page="VanillaOptionsPayoffSimulator")
+if st.sidebar.button("Forward Backtesting"):
+    st.experimental_set_query_params(page="ForwardBacktesting")
+
 
 # Determine which page to show based on the query parameter
 query_params = st.experimental_get_query_params()
 page = query_params.get("page", ["Home"])[0]
 
-# Main Page Rendering
-if page == "Home":
-    st.title("Welcome to Decimal Hedge Strategies Simulator")
-    st.markdown("""
-    This application is designed to help our clients better understand the financial aspects of hedging their cryptocurrency assets.
-    We offer various strategies that can be simulated to visualize potential outcomes and compare different hedging techniques.
-    
-    Explore the tools provided in this application to see how you can mitigate risks and optimize your returns in the volatile world of crypto.
-    
-    **Choose a strategy** from the sidebar to get started.
-    """)
 
-elif page == "ForwardBacktesting":
+if page == "ForwardBacktesting":
     st.title("Forward Backtesting")
     
     # Explanation of the Forward Backtesting Strategy
