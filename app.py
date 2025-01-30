@@ -274,9 +274,9 @@ elif page == "VanillaOptionsPayoffSimulator":
     st.subheader("Market Data")
     col1, col2 = st.columns(2)
     with col1:
-        volatility = st.number_input("Volatility (σ)", value=0.2, min_value=0.0, format="%.2f")
+        volatility = st.number_input("Volatility (σ)", value=0.6, min_value=0.0, format="%.2f")
     with col2:
-        risk_free_rate = st.number_input("Risk-Free Rate (r)", value=0.05, min_value=0.0, format="%.2f")
+        risk_free_rate = st.number_input("Risk-Free Rate (r)", value=0.0, min_value=-0.000001, format="%.2f")
     
     st.subheader("Add New Option Leg")
     with st.form(key='option_form'):
