@@ -1,3 +1,4 @@
+we have this code below, i want you to change it, correct the p&l calculations, also made it so we can backtest some payoff we can create on the streamlit app, for example i can add some legs (of calls or puts), it will compute the price of the options at each time and the payoff at each maturity, remove the forward, we will only use options legs :
 
 import streamlit as st
 import numpy as np
