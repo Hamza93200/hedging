@@ -139,6 +139,7 @@ def plot_results_adjusted(df, asset, rewards_frequency):
     ax.grid(True)
     st.pyplot(fig)
     
+    '''
     # Plotting the PnL
     st.subheader("PnL at Exchange Dates")
     fig, ax = plt.subplots(figsize=(8, 4))
@@ -148,7 +149,7 @@ def plot_results_adjusted(df, asset, rewards_frequency):
     ax.legend()
     ax.grid(True)
     st.pyplot(fig)
-
+    '''
 
 
 def calculate_option_payoff(option_type, is_bought, strike_price, spot_prices, premium):
