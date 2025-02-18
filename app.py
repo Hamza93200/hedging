@@ -4,6 +4,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
 import math as mt
+from scipy.stats import norm
 
 # Helper Functions
 def convert_maturity_to_years(maturity):
@@ -112,6 +113,114 @@ def hedge_strategy_corrected(df, start_date, rewards_frequency, reward_amount, m
     
     return df
 
+
+
+
+# Function to calculate European put option price using Black-Scholes
+def black_scholes_put(S, K, T, r, sigma):
+    """Calculate the Black-Scholes price of a European put option."""
+    d1 = (np.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
+    d2 = d1 - sigma * np.sqrt(T)
+    put_price = K * np.exp(-r * T) * norm.cdf(-d2) - S * norm.cdf(-d1)
+    return put_price
+
+
+# Hedging strategy using put options
+def hedge_strategy_puts(df, start_date, rewards_frequency, reward_amount, maturity, asset, r=0.02, sigma=0.4):
+    """
+    Hedge rewards accumulation using ATM put options.
+    
+    - Buys ATM put options at each maturity.
+    - Decides whether to exercise the option or sell at market.
+    - Deducts option cost from the final notional.
+    
+    Parameters:
+    - df: DataFrame containing asset price data.
+    - start_date: Start date for the strategy.
+    - rewards_frequency: 'Daily', 'Weekly', or 'Monthly'.
+    - reward_amount: Amount of rewards accumulated per period.
+    - maturity: Option maturity (e.g., '1M', '3M').
+    - asset: Asset column name in df.
+    - r: Risk-free rate (default 2%).
+    - sigma: Estimated asset volatility (default 40%).
+    """
+    maturity_period = convert_maturity_to_days(maturity)
+    
+    if asset not in df.columns:
+        raise ValueError(f"Asset '{asset}' not found in data. Available assets: {', '.join(df.columns[1:])}")
+    
+    asset_data_start_date = df[df[asset].notna()]['Date'].min()
+    start_date = pd.to_datetime(start_date) if pd.to_datetime(start_date) >= asset_data_start_date else asset_data_start_date
+    
+    df = df[df['Date'] >= start_date].copy()
+    
+    df[f'Notional Exchanged Put ({asset})'] = 0.0
+    df[f'Notional Exchanged Spot ({asset})'] = 0.0
+    df[f'Cumulative Put ({asset})'] = 0.0
+    df[f'Cumulative Spot ({asset})'] = 0.0
+    df[f'PnL ({asset})'] = 0.0
+    df[f'Option Cost ({asset})'] = 0.0
+    
+    reward_interval = {'Daily': 1, 'Weekly': 7, 'Monthly': 30}[rewards_frequency]
+    total_rewards = 0
+    last_maturity_date = 0
+
+    for i in range(len(df)):
+        if i % reward_interval == 0:
+            spot_price = df.loc[df.index[i], asset]
+            total_rewards += reward_amount  # Accumulate rewards
+            
+            # Calculate ATM put price (strike = spot price)
+            put_price = black_scholes_put(S=spot_price, K=spot_price, T=maturity_period / 365, r=r, sigma=sigma)
+            total_option_cost = put_price * reward_amount  # Cost of hedging the reward
+            
+            # Store option cost
+            df.loc[df.index[i], f'Option Cost ({asset})'] = total_option_cost
+            
+            # Check if it's time to settle put options
+            if i >= maturity_period:
+                put_maturity_price = df.loc[df.index[i - maturity_period], asset]  # Price at option purchase
+                final_spot_price = df.loc[df.index[i], asset]  # Spot price at maturity
+                
+                if final_spot_price < put_maturity_price:  # Exercise the put option
+                    df.loc[df.index[i], f'Notional Exchanged Put ({asset})'] = put_maturity_price * reward_amount
+                else:  # Sell at market
+                    df.loc[df.index[i], f'Notional Exchanged Spot ({asset})'] = final_spot_price * reward_amount
+            
+            last_maturity_date = i
+        
+        # Update cumulative values
+        if i > 0:
+            df.loc[df.index[i], f'Cumulative Spot ({asset})'] = (
+                df.loc[df.index[i-1], f'Cumulative Spot ({asset})'] + df.loc[df.index[i], f'Notional Exchanged Spot ({asset})']
+            )
+            df.loc[df.index[i], f'Cumulative Put ({asset})'] = (
+                df.loc[df.index[i-1], f'Cumulative Put ({asset})'] + df.loc[df.index[i], f'Notional Exchanged Put ({asset})']
+            )
+        else:
+            df.loc[df.index[i], f'Cumulative Spot ({asset})'] = df.loc[df.index[i], f'Notional Exchanged Spot ({asset})']
+            df.loc[df.index[i], f'Cumulative Put ({asset})'] = df.loc[df.index[i], f'Notional Exchanged Put ({asset})']
+    
+    # Deduct final option cost from the accumulated notional
+    df[f'Final Notional ({asset})'] = df[f'Cumulative Put ({asset})'] + df[f'Cumulative Spot ({asset})'] - df[f'Option Cost ({asset})'].cumsum()
+    
+    final_spot_notional = f"{round(df[f'Cumulative Spot ({asset})'].iloc[-1]):,}"
+    final_put_notional = f"{round(df[f'Cumulative Put ({asset})'].iloc[-1]):,}"
+    final_option_cost = f"{round(df[f'Option Cost ({asset})'].sum()):,}"
+    final_hedged_notional = f"{round(df[f'Final Notional ({asset})'].iloc[-1]):,}"
+    
+    difference = f"{int(final_hedged_notional.replace(',', '')) - int(final_spot_notional.replace(',', '')):,}"
+    returns = (int(final_hedged_notional.replace(',', '')) / int(final_spot_notional.replace(',', '')) - 1) * 100
+    
+    # Display results
+    st.subheader("Results")
+    st.write(f"**Final accumulated notional with spot strategy:** {final_spot_notional} USD")
+    st.write(f"**Final accumulated notional with put hedge strategy:** {final_hedged_notional} USD")
+    st.write(f"**Total cost of put options:** {final_option_cost} USD")
+    st.write(f"**Difference between hedged and spot strategies:** {difference} USD")
+    st.write(f"**Return of hedged strategy relative to spot:** {returns:.2f}%")
+    
+    return df
 
 def plot_results_adjusted(df, asset, rewards_frequency):
     st.subheader("Spot vs Forward Prices and PnL at Exchange Dates")
@@ -257,6 +366,48 @@ if page == "ForwardBacktesting":
     if st.button("Run Hedging Strategy"):
         with st.spinner("Running hedging strategy simulation..."):
             hedged_df_corrected = hedge_strategy_corrected(hp_df, start_date, rewards_frequency, reward_amount, maturity, asset)
+            plot_results_adjusted(hedged_df_corrected, asset, rewards_frequency)
+
+
+elif page == "PutsBacktesting":
+    st.title("Puts Backtesting")
+    
+    # Explanation of the Forward Backtesting Strategy
+    #st.markdown("""
+    #In this simulation, we aim to compare the effectiveness of using a spot strategy versus a forward strategy over a specified period. 
+    #A spot strategy involves exchanging the asset at its current market price (spot price) when rewards are claimed, while a forward strategy 
+    #locks-in a future price (forward price) today for delivery at a later date. By backtesting these strategies on historical data, 
+    #we can determine the Pnl you could reach by using a forward hedging strategy.
+    
+    #You can customize the parameters of the simulation, such as the Hedge start date, the frequency of rewards, and the maturity of the forward 
+    #contracts, to see how different strategies would have performed.
+    #""")
+
+    # Load data from GitHub
+    github_url = 'https://raw.githubusercontent.com/hamza93200/hedging/main/HP.xlsx'
+    try:
+        hp_df = pd.read_excel(github_url)
+    except Exception as e:
+        st.error(f"Failed to load data: {e}")
+    
+    st.subheader("Input Parameters")
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        start_date = st.date_input("Hedge start date", value=pd.to_datetime("2018-03-01"))
+    with col2:
+        rewards_frequency = st.selectbox("Rewards Frequency", options=['Daily', 'Weekly', 'Monthly'])
+    with col3:
+        asset = st.selectbox("Asset", options=hp_df.columns[1:])
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        reward_amount = st.number_input("Reward Amount in Kind", value=1.0, min_value=0.0)
+    with col2:
+        maturity = st.selectbox("Forward Maturity", options=['1w', '1M', '3M', '6M', '12M', '24M', '36M'], index=4)  # Default to '12M'
+    
+    if st.button("Run Hedging Strategy"):
+        with st.spinner("Running hedging strategy simulation..."):
+            hedged_df_corrected = hedge_strategy_puts(hp_df, start_date, rewards_frequency, reward_amount, maturity, asset)
             plot_results_adjusted(hedged_df_corrected, asset, rewards_frequency)
 
 
