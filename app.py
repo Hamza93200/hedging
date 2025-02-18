@@ -220,18 +220,18 @@ page = query_params.get("page", ["Home"])[0]
 
 if page == "ForwardBacktesting":
     st.title("Forward Backtesting")
-    '''
-    # Explanation of the Forward Backtesting Strategy
-    st.markdown("""
-    In this simulation, we aim to compare the effectiveness of using a spot strategy versus a forward strategy over a specified period. 
-    A spot strategy involves exchanging the asset at its current market price (spot price) when rewards are claimed, while a forward strategy 
-    locks-in a future price (forward price) today for delivery at a later date. By backtesting these strategies on historical data, 
-    we can determine the Pnl you could reach by using a forward hedging strategy.
     
-    You can customize the parameters of the simulation, such as the Hedge start date, the frequency of rewards, and the maturity of the forward 
-    contracts, to see how different strategies would have performed.
-    """)
-'''
+    # Explanation of the Forward Backtesting Strategy
+    #st.markdown("""
+    #In this simulation, we aim to compare the effectiveness of using a spot strategy versus a forward strategy over a specified period. 
+    #A spot strategy involves exchanging the asset at its current market price (spot price) when rewards are claimed, while a forward strategy 
+    #locks-in a future price (forward price) today for delivery at a later date. By backtesting these strategies on historical data, 
+    #we can determine the Pnl you could reach by using a forward hedging strategy.
+    
+    #You can customize the parameters of the simulation, such as the Hedge start date, the frequency of rewards, and the maturity of the forward 
+    #contracts, to see how different strategies would have performed.
+    #""")
+
     # Load data from GitHub
     github_url = 'https://raw.githubusercontent.com/hamza93200/hedging/main/HP.xlsx'
     try:
