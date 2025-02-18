@@ -320,7 +320,8 @@ if st.sidebar.button("Vanilla Options Payoff Simulator"):
     st.experimental_set_query_params(page="VanillaOptionsPayoffSimulator")
 if st.sidebar.button("Forward Backtesting"):
     st.experimental_set_query_params(page="ForwardBacktesting")
-
+if st.sidebar.button("Puts Backtesting"):
+    st.experimental_set_query_params(page="PutsBacktesting")
 
 # Determine which page to show based on the query parameter
 query_params = st.experimental_get_query_params()
