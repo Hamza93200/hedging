@@ -220,7 +220,7 @@ page = query_params.get("page", ["Home"])[0]
 
 if page == "ForwardBacktesting":
     st.title("Forward Backtesting")
-    
+    '''
     # Explanation of the Forward Backtesting Strategy
     st.markdown("""
     In this simulation, we aim to compare the effectiveness of using a spot strategy versus a forward strategy over a specified period. 
@@ -231,7 +231,7 @@ if page == "ForwardBacktesting":
     You can customize the parameters of the simulation, such as the Hedge start date, the frequency of rewards, and the maturity of the forward 
     contracts, to see how different strategies would have performed.
     """)
-
+'''
     # Load data from GitHub
     github_url = 'https://raw.githubusercontent.com/hamza93200/hedging/main/HP.xlsx'
     try:
