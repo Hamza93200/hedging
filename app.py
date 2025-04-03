@@ -528,7 +528,6 @@ def put_hedge(put_strike_multiplier,daily_rewards,protocol,option_maturity,hedgi
                 elif spot > put_strike:
                     hedged_offramp_notional.append(actual_accumulated_rewards * spot)
 
-
             else:
                 if spot <= put_strike:
                     temp_not = accumulated_rewards * put_strike
@@ -537,8 +536,8 @@ def put_hedge(put_strike_multiplier,daily_rewards,protocol,option_maturity,hedgi
                 elif spot > put_strike:
                     temp_not=accumulated_rewards * spot
                 
-                temp_not =temp_not + (actual_accumulated_rewards-accumulated_rewards*spot)
-                
+                temp_not =temp_not + ((actual_accumulated_rewards-accumulated_rewards)*spot)
+
                 hedged_offramp_notional.append(temp_not)
 
 
