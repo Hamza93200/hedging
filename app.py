@@ -11,7 +11,6 @@ import time
 import os 
 
 
-
 def black_scholes_price(option_type, S, K, T, r, sigma):
     d1 = (np.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
     d2 = d1 - sigma * np.sqrt(T)
@@ -472,7 +471,7 @@ def put_hedge(put_strike_multiplier,daily_rewards,protocol,option_maturity,hedgi
     hedging_start_date = data_to_hedge.first_valid_index()
 
     start_window = hedging_start_date - pd.Timedelta(days=30)
-    st.write(f"from : {start_window}")
+
     df_base_rewards = data_rewards[protocol][(data_rewards.index > start_window) & (data_rewards.index < hedging_start_date)]
     notional_tohedge_inkind = df_base_rewards.mean()* percent_to_hedge
     st.write(f"Daily average rewards: {notional_tohedge_inkind}")
@@ -562,7 +561,6 @@ def put_hedge(put_strike_multiplier,daily_rewards,protocol,option_maturity,hedgi
 
             days_until_maturity = option_maturity
             start_window = data_rewards_from_start.index[i] - pd.Timedelta(days=30)
-            st.write(f"from : {start_window}")
             df_base_rewards = data_rewards[protocol][(data_rewards.index > start_window) & (data_rewards.index < data_rewards_from_start.index[i])]
             notional_tohedge_inkind = df_base_rewards.mean()* percent_to_hedge
             st.write(f"Daily average rewards: {notional_tohedge_inkind}")
@@ -581,8 +579,7 @@ def put_hedge(put_strike_multiplier,daily_rewards,protocol,option_maturity,hedgi
     spot_end_notional = sum(weekly_offramp_notional)
     hedged_end_notional = sum(hedged_offramp_notional)
     put_options_price = sum(put_prices)
-    st.write(hedged_end_notional)
-    st.write(spot_end_notional)
+
 
     final_pnl = hedged_end_notional - spot_end_notional -put_options_price
     final_pnl_perc = (((hedged_end_notional- put_options_price) / spot_end_notional) - 1) * 100
