@@ -10,6 +10,7 @@ import requests
 import time
 import os 
 
+
 def black_scholes_price(option_type, S, K, T, r, sigma):
     d1 = (np.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
     d2 = d1 - sigma * np.sqrt(T)
@@ -474,7 +475,9 @@ def put_hedge(put_strike_multiplier,daily_rewards,protocol,option_maturity,hedgi
     df_base_rewards = data_rewards[protocol][(data_rewards.index > start_window) & (data_rewards.index < hedging_start_date)]
     notional_tohedge_inkind = df_base_rewards.mean()* percent_to_hedge
     st.write(f"Daily average rewards: {notional_tohedge_inkind}")
+
     mask = data_rewards.index >= pd.to_datetime(hedging_start_date)
+
     data_rewards_from_start = data_rewards.loc[mask, protocol]
     data_rewards_from_start = data_rewards_from_start.dropna()
 
@@ -517,26 +520,33 @@ def put_hedge(put_strike_multiplier,daily_rewards,protocol,option_maturity,hedgi
             accumulated_rewards = sum(hedged_offramp_rewards)
             actual_accumulated_rewards = sum(actual_rewards)
 
-            
-
             if actual_accumulated_rewards < accumulated_rewards:
                 if spot <= put_strike:
                     hedged_offramp_notional.append(actual_accumulated_rewards * put_strike)
 
                 elif spot > put_strike:
                     hedged_offramp_notional.append(actual_accumulated_rewards * spot)
-            
+
+
             else:
                 if spot <= put_strike:
-                    hedged_offramp_notional.append(accumulated_rewards * put_strike)
+                    temp_not = accumulated_rewards * put_strike
+                    
 
                 elif spot > put_strike:
-                    hedged_offramp_notional.append(accumulated_rewards * spot)
+                    temp_not=accumulated_rewards * spot
+                
+                temp_not =temp_not + (actual_accumulated_rewards-accumulated_rewards*spot)
+                
+                hedged_offramp_notional.append(temp_not)
+
+
+
 
             
             monthly_actual_rewards.append(actual_accumulated_rewards)
             monthly_hedged_rewards .append(accumulated_rewards)
-            
+
             hedged_offramp_rewards = []
             actual_rewards = []
 
