@@ -10,6 +10,7 @@ import requests
 import time
 import os 
 
+os.chdir("/users/hamzamuhammad/Documents/")
 
 def black_scholes_price(option_type, S, K, T, r, sigma):
     d1 = (np.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
@@ -106,7 +107,7 @@ def black_scholes_call(S, K, T, r, sigma):
 
 
 
-def put_hedge(put_strike_multiplier,daily_rewards,protocol,option_maturity,hedging_start_date,IR=0.05,sigma=0.6,broker_spread=0.01):
+def put_hedge1(put_strike_multiplier,daily_rewards,protocol,option_maturity,hedging_start_date,IR=0.05,sigma=0.6,broker_spread=0.01):
     data = pd.read_excel("HP.xlsx",index_col=0,parse_dates=True)
     data_to_hedge = data[protocol][data.index >= pd.to_datetime(hedging_start_date)]
     data_to_hedge = data_to_hedge.dropna()
@@ -379,12 +380,13 @@ def collar(call_strike_multiplier,put_strike_multiplier,daily_rewards,protocol,o
 
     for i in range(len(data_to_hedge)):
 
-        weekly_offramp_rewards.append(daily_rewards)
+        
         hedged_offramp_rewards.append(notional_tohedge_inkind)
         
         spot = data_to_hedge[i]
         today_reward = data_rewards_from_start[i]
         actual_rewards.append(today_reward)
+        weekly_offramp_rewards.append(today_reward)
 
 
         if days_until_maturity == 0:
@@ -409,6 +411,7 @@ def collar(call_strike_multiplier,put_strike_multiplier,daily_rewards,protocol,o
                 elif spot >= call_strike:
                     temp_notional=accumulated_rewards * spot - ((spot - call_strike) * accumulated_rewards)
             
+
             hedged_offramp_notional.append(temp_notional)
             
             monthly_actual_rewards.append(actual_accumulated_rewards)
@@ -427,6 +430,11 @@ def collar(call_strike_multiplier,put_strike_multiplier,daily_rewards,protocol,o
             call_prices.append(call_price *(option_maturity*notional_tohedge_inkind))
 
             days_until_maturity = option_maturity
+            start_window = data_rewards_from_start.index[i] - pd.Timedelta(days=30)
+            st.write(f"from : {start_window}")
+            df_base_rewards = data_rewards[protocol][(data_rewards.index > start_window) & (data_rewards.index < data_rewards_from_start.index[i])]
+            notional_tohedge_inkind = df_base_rewards.mean()* percent_to_hedge
+            st.write(f"Daily average rewards: {notional_tohedge_inkind}")
         
         if days_until_week_end == 0:
             
@@ -447,8 +455,130 @@ def collar(call_strike_multiplier,put_strike_multiplier,daily_rewards,protocol,o
 
     final_pnl = hedged_end_notional - spot_end_notional + options_price_paid
     final_pnl_perc = ((hedged_end_notional / spot_end_notional) - 1) * 100
+    df_hedged_vs_actual_rewards = pd.DataFrame({"Hegded rewards per month":monthly_hedged_rewards,"Actual rewards per month": monthly_actual_rewards})
     
-    return spot_end_notional,hedged_end_notional,final_pnl,final_pnl_perc,call_prices,put_options_price,call_options_price,options_price_paid
+    return spot_end_notional,hedged_end_notional,final_pnl,final_pnl_perc,call_prices,put_options_price,call_options_price,options_price_paid,df_hedged_vs_actual_rewards
+
+
+
+
+def put_hedge(put_strike_multiplier,daily_rewards,protocol,option_maturity,hedging_start_date,percent_to_hedge=0.7,IR=0.05,sigma=0.6,broker_spread=0.10):
+
+    data = pd.read_excel("HP.xlsx",index_col=0,parse_dates=True)
+    data_rewards = pd.read_excel("v2_revenue.xlsx",index_col=0,parse_dates=True)
+
+    data_to_hedge = data[protocol][data.index >= pd.to_datetime(hedging_start_date)]
+    data_to_hedge = data_to_hedge.dropna()
+    hedging_start_date = data_to_hedge.first_valid_index()
+
+    start_window = hedging_start_date - pd.Timedelta(days=30)
+    st.write(f"from : {start_window}")
+    df_base_rewards = data_rewards[protocol][(data_rewards.index > start_window) & (data_rewards.index < hedging_start_date)]
+    notional_tohedge_inkind = df_base_rewards.mean()* percent_to_hedge
+    st.write(f"Daily average rewards: {notional_tohedge_inkind}")
+    mask = data_rewards.index >= pd.to_datetime(hedging_start_date)
+    data_rewards_from_start = data_rewards.loc[mask, protocol]
+    data_rewards_from_start = data_rewards_from_start.dropna()
+
+    weekly_offramp_rewards = []
+    hedged_offramp_rewards = []
+    actual_rewards = []
+
+    monthly_actual_rewards = []
+    monthly_hedged_rewards = []
+
+    weekly_offramp_notional = []
+    hedged_offramp_notional = []
+
+    put_prices = []
+
+    days_until_maturity = option_maturity
+    days_until_week_end = 7
+
+    spot = data_to_hedge[0]
+    strike = spot * np.exp(1/12 * IR)
+    put_strike = strike *put_strike_multiplier
+
+    put_price = black_scholes_put(spot,put_strike,option_maturity/365,IR,sigma)
+
+    put_prices.append(put_price * (option_maturity*notional_tohedge_inkind))
+
+    for i in range(len(data_to_hedge)):
+
+        
+        hedged_offramp_rewards.append(notional_tohedge_inkind)
+        
+        spot = data_to_hedge[i]
+        today_reward = data_rewards_from_start[i]
+        actual_rewards.append(today_reward)
+        weekly_offramp_rewards.append(today_reward)
+
+
+        if days_until_maturity == 0:
+
+            accumulated_rewards = sum(hedged_offramp_rewards)
+            actual_accumulated_rewards = sum(actual_rewards)
+
+            
+
+            if actual_accumulated_rewards < accumulated_rewards:
+                if spot <= put_strike:
+                    hedged_offramp_notional.append(actual_accumulated_rewards * put_strike)
+
+                elif spot > put_strike:
+                    hedged_offramp_notional.append(actual_accumulated_rewards * spot)
+            
+            else:
+                if spot <= put_strike:
+                    hedged_offramp_notional.append(accumulated_rewards * put_strike)
+
+                elif spot > put_strike:
+                    hedged_offramp_notional.append(accumulated_rewards * spot)
+
+            
+            monthly_actual_rewards.append(actual_accumulated_rewards)
+            monthly_hedged_rewards .append(accumulated_rewards)
+            
+            hedged_offramp_rewards = []
+
+            strike = spot * np.exp(1/12 * IR)
+            put_strike = strike *put_strike_multiplier
+
+
+            put_price = black_scholes_put(spot,put_strike,option_maturity/365,IR,sigma)
+
+            put_prices.append(put_price* (option_maturity*notional_tohedge_inkind))
+
+            days_until_maturity = option_maturity
+            start_window = data_rewards_from_start.index[i] - pd.Timedelta(days=30)
+            st.write(f"from : {start_window}")
+            df_base_rewards = data_rewards[protocol][(data_rewards.index > start_window) & (data_rewards.index < data_rewards_from_start.index[i])]
+            notional_tohedge_inkind = df_base_rewards.mean()* percent_to_hedge
+            st.write(f"Daily average rewards: {notional_tohedge_inkind}")
+        
+        if days_until_week_end == 0:
+            
+            accumulated_rewards = sum(weekly_offramp_rewards)
+            weekly_offramp_notional.append(accumulated_rewards * (spot - (broker_spread)) )
+            weekly_offramp_rewards = []
+
+            days_until_week_end = 7
+        
+        days_until_week_end -= 1
+        days_until_maturity -= 1
+
+    spot_end_notional = sum(weekly_offramp_notional)
+    hedged_end_notional = sum(hedged_offramp_notional)
+    put_options_price = sum(put_prices)
+
+
+    final_pnl = hedged_end_notional - spot_end_notional 
+    final_pnl_perc = ((hedged_end_notional / spot_end_notional) - 1) * 100
+    df_hedged_vs_actual_rewards = pd.DataFrame({"Hegded rewards per month":monthly_hedged_rewards,"Actual rewards per month": monthly_actual_rewards})
+    
+    return spot_end_notional,hedged_end_notional,final_pnl,final_pnl_perc,put_options_price,df_hedged_vs_actual_rewards
+
+
 
 
 
@@ -661,7 +791,7 @@ def Backtesting():
     st.subheader("Input Parameters")
     
 
-    product = st.selectbox("Product", options =['Put','Call','Collar'] )
+    product = st.selectbox("Product", options =['Put','Collar'] )
     
     if product == "Collar":
         col1, col2, col3,col4= st.columns(4)
@@ -688,7 +818,7 @@ def Backtesting():
 
     col1, col2, col3 = st.columns(3)
     with col1:
-        start_date = st.date_input("Hedge start date", value=temp_df)
+        start_date = st.date_input("Hedge start date", value=datetime(2025,1,1))
     with col2:
         rewards_frequency = st.selectbox("Rewards Frequency", options=['Daily'])
     with col3:
@@ -706,18 +836,18 @@ def Backtesting():
                 
                 hedging_start_date = start_date
 
-                spot_end_notional,hedged_end_notional,options_price_spent,final_pnl,final_pnl_perc, put_prices = put_hedge(put_strike_multiplier,daily_rewards,protocol,option_maturity,hedging_start_date,sigma =0.85)
+                spot_end_notional,hedged_end_notional,final_pnl,final_pnl_perc,put_options_price,df_hedged_vs_actual_rewards = put_hedge(put_strike_multiplier,daily_rewards,protocol,option_maturity,hedging_start_date,sigma =0.85)
                 st.subheader("Strategy Results")
 
                 st.write('### Strategy : Buy Put')
-                st.write(f"Daily {daily_rewards} {protocol} rewards sold each week at spot vs each {option_maturity} days with put options strike {int(put_strike_multiplier*100)}")
+                #st.write(f"Daily {daily_rewards} {protocol} rewards sold each week at spot vs each {option_maturity} days with put options strike {int(put_strike_multiplier*100)}")
                 st.write(f"**End USDT notional with weekly offramps:** {round(spot_end_notional,2):,} $")
                 st.write(f"**End USDT notional with puts and offramps each {option_maturity} days:** {round(hedged_end_notional):,} $")
-                st.write(f"**End USDT notional spent buying put options:** {round(options_price_spent):,} $")
+                st.write(f"**End USDT notional spent buying put options:** {round(put_options_price):,} $")
 
                 st.write(f"**Final PnL:** {round(final_pnl,2):,} $")
                 st.write(f"**Final PnL in %:** {round(final_pnl_perc,2):,}%")
-                st.dataframe(put_prices)
+                st.dataframe(df_hedged_vs_actual_rewards)
             
             if product == "Call":
 
@@ -752,17 +882,17 @@ def Backtesting():
                 
                 hedging_start_date = start_date
 
-                spot_end_notional,hedged_end_notional,final_pnl,final_pnl_perc,call_prices,put_options_price,call_options_price,options_price_paid = collar(call_strike_multiplier,put_strike_multiplier,daily_rewards,protocol,option_maturity,hedging_start_date,sigma = 0.6)
+                spot_end_notional,hedged_end_notional,final_pnl,final_pnl_perc,call_prices,put_options_price,call_options_price,options_price_paid,df_hedgedvsnon = collar(call_strike_multiplier,put_strike_multiplier,daily_rewards,protocol,option_maturity,hedging_start_date,sigma = 0.6)
 
 
                 st.subheader("Strategy Results")
-                st.image("collar.png")
+                
 
                 st.write('### Strategy : Combined Put and Call Strategy')
-                st.write(f"Daily {daily_rewards} {protocol} rewards sold each week at spot vs each {option_maturity} days hedged with Collar")
+                #st.write(f"Daily {daily_rewards} {protocol} rewards sold each week at spot vs each {option_maturity} days hedged with Collar")
 
                 st.write(f"**Notional with weekly offramps:** {round(spot_end_notional,2):,} $")
-                st.write(f"**Notional with put hedged offramps each {option_maturity} days:** {round(hedged_end_notional):,} $")
+                st.write(f"**Notional with Collar hedged offramps each {option_maturity} days:** {round(hedged_end_notional):,} $")
 
                 st.write(f"**Notional paid to buy put options:** {round(put_options_price):,} $")
                 st.write(f"**Notional gained selling call options:** {round(call_options_price):,} $")
@@ -770,6 +900,8 @@ def Backtesting():
 
                 st.write(f"**Final PnL in $:** {round(final_pnl,2):,} $")
                 st.write(f"**Final PnL in %:** {round(final_pnl_perc,2):,}%")
+                st.dataframe(df_hedgedvsnon)
+                st.image("collar.png")
 
     
                 
@@ -868,7 +1000,7 @@ def VanillaOptionsPayoffSimulator():
 
 
 st.sidebar.title("Kiln Hedging Strats")
-page = st.sidebar.radio("Go to", ["Option Payoffs", "Backtesting", "Options PnL"])
+page = st.sidebar.radio("Go to", ["Option Payoffs", "Backtesting"])
 
 # Display the selected page
 if page == "Option Payoffs":
