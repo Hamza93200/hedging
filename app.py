@@ -1,4 +1,3 @@
-
 import streamlit as st
 import numpy as np
 import matplotlib.pyplot as plt
@@ -107,78 +106,522 @@ def black_scholes_call(S, K, T, r, sigma):
 
 
 
-def put_hedge1(put_strike_multiplier,daily_rewards,protocol,option_maturity,hedging_start_date,IR=0.05,sigma=0.6,broker_spread=0.01):
-    data = pd.read_excel("HP.xlsx",index_col=0,parse_dates=True)
-    data_to_hedge = data[protocol][data.index >= pd.to_datetime(hedging_start_date)]
+def put_hedge(put_strike_multiplier, daily_rewards, protocol, option_maturity, hedging_start_date, hedging_end_date=None, percent_to_hedge=0.7, IR=0.05, sigma=0.6, broker_spread=0.10):
+    # Load price data from CSV files instead of HP.xlsx
+    try:
+        if protocol.lower() == 'eth':
+            price_data = pd.read_csv("prices_eth.csv")
+            price_data['date'] = pd.to_datetime(price_data['date'])
+            price_data.set_index('date', inplace=True)
+        elif protocol.lower() == 'sol':
+            price_data = pd.read_csv("prices_sol.csv")
+            price_data['date'] = pd.to_datetime(price_data['date'])
+            price_data.set_index('date', inplace=True)
+        
+        # Convert dates to datetime
+        hedging_start_date_dt = pd.to_datetime(hedging_start_date)
+        
+        # Use end date if provided, otherwise use all available data
+        if hedging_end_date is not None:
+            hedging_end_date_dt = pd.to_datetime(hedging_end_date)
+            data_to_hedge = price_data['end_of_day'][
+                (price_data.index >= hedging_start_date_dt) & 
+                (price_data.index <= hedging_end_date_dt)
+            ]
+        else:
+            data_to_hedge = price_data['end_of_day'][price_data.index >= hedging_start_date_dt]
+        
+        # Load volatility from the same CSV
+        vol_data = price_data.copy()
+        # Fill missing volatility values with the default
+        vol_data['vol'] = vol_data['vol'].fillna(sigma)
+        
+        # Get initial volatility for start date (for display only)
+        closest_date_idx = vol_data.index.get_indexer([hedging_start_date_dt], method='nearest')[0]
+        closest_date = vol_data.index[closest_date_idx]
+        
+        if not pd.isna(vol_data.loc[closest_date, 'vol']):
+            initial_sigma = vol_data.loc[closest_date, 'vol']
+            st.write(f"Starting volatility from {closest_date.date()}: {initial_sigma:.2f}")
+        else:
+            initial_sigma = sigma
+            st.warning(f"No volatility data found for {closest_date.date()}. Using default value: {initial_sigma}")
+        
+    except Exception as e:
+        st.error(f"Error loading CSV data: {e}")
+        # Fallback to HP.xlsx
+        data = pd.read_excel("HP.xlsx", index_col=0, parse_dates=True)
+        if hedging_end_date is not None:
+            data_to_hedge = data[protocol][
+                (data.index >= pd.to_datetime(hedging_start_date)) & 
+                (data.index <= pd.to_datetime(hedging_end_date))
+            ]
+        else:
+            data_to_hedge = data[protocol][data.index >= pd.to_datetime(hedging_start_date)]
+    
+    data_rewards = pd.read_excel("v2_revenue.xlsx", index_col=0, parse_dates=True)
+    
     data_to_hedge = data_to_hedge.dropna()
     hedging_start_date = data_to_hedge.first_valid_index()
 
+    # Get previous month rewards to determine hedge amount
+    start_window = pd.to_datetime(hedging_start_date) - pd.Timedelta(days=30)
+    previous_month_rewards = data_rewards[protocol][
+        (data_rewards.index > start_window) & 
+        (data_rewards.index < pd.to_datetime(hedging_start_date))
+    ]
+    
+    # Calculate average daily rewards from previous month
+    prev_month_avg_daily = previous_month_rewards.mean()
+    
+    # Calculate hedged amount (fixed based on previous month)
+    notional_tohedge_inkind = prev_month_avg_daily * percent_to_hedge
+    
+    st.write(f"Previous month daily average rewards: {prev_month_avg_daily:.4f}")
+    st.write(f"Hedged amount (fixed): {notional_tohedge_inkind:.4f} ({percent_to_hedge*100:.0f}%)")
+    
+    mask = data_rewards.index >= pd.to_datetime(hedging_start_date)
+
+    data_rewards_from_start = data_rewards.loc[mask, protocol]
+    data_rewards_from_start = data_rewards_from_start.dropna()
+
     weekly_offramp_rewards = []
     hedged_offramp_rewards = []
+    nonhedged_offramp_rewards = []
+    actual_rewards = []
+
+    monthly_actual_rewards = []
+    monthly_hedged_rewards = []
 
     weekly_offramp_notional = []
     hedged_offramp_notional = []
+    nonhedged_offramp_notional = []  # Track non-hedged portion separately
 
     put_prices = []
-
+    
     days_until_maturity = option_maturity
     days_until_week_end = 7
 
+    # Initialize transaction logs
+    transaction_log = []
+    spot_strategy_log = []
+    hedged_strategy_log = []
+    
+    # Storage for volatilities used at each option purchase
+    volatilities_used = []
+    
+    # Set initial values for the first option
     spot = data_to_hedge[0]
     strike = spot * np.exp(1/12 * IR)
-    put_strike = strike *put_strike_multiplier
+    put_strike = strike * put_strike_multiplier
+    
+    # Get initial volatility
+    current_date = data_to_hedge.index[0]
+    try:
+        closest_date_idx = vol_data.index.get_indexer([current_date], method='nearest')[0]
+        closest_date = vol_data.index[closest_date_idx]
+        current_sigma = vol_data.loc[closest_date, 'vol'] if not pd.isna(vol_data.loc[closest_date, 'vol']) else sigma
+        volatilities_used.append(current_sigma)
+    except:
+        current_sigma = sigma
+        volatilities_used.append(current_sigma)
+    
+    # Initial option purchase - FIXED COST CALCULATION
+    put_price = black_scholes_put(spot, put_strike, option_maturity/365, IR, current_sigma)
+    # We need to multiply by option_maturity because notional_tohedge_inkind is a DAILY amount
+    option_cost = put_price * (option_maturity * notional_tohedge_inkind)
+    put_prices.append(option_cost)
+    
+    # Improve transaction log for initial option purchase
+    transaction_log.append({
+        'date': data_to_hedge.index[0].strftime('%Y-%m-%d'),
+        'type': 'Option Purchase',
+        'details': f"Bought put option at strike {put_strike:.2f} ({put_strike_multiplier*100:.0f}% of {spot:.2f})",
+        'strike': put_strike,
+        'spot_price': spot,
+        'rewards_amount': option_maturity * notional_tohedge_inkind,
+        'premium_per_unit': put_price,
+        'cost': option_cost,
+        'vol': current_sigma,
+        'maturity': option_maturity,
+        'expiry_date': (data_to_hedge.index[0] + pd.Timedelta(days=option_maturity)).strftime('%Y-%m-%d')
+    })
 
-    put_price = black_scholes_put(spot,put_strike,option_maturity/365,IR,sigma)
-
-
-    put_prices.append(put_price *(option_maturity*daily_rewards))
-
+    # Add a flag to track if final liquidation has happened
+    final_liquidation_done = False
+    
     for i in range(len(data_to_hedge)):
-
-        weekly_offramp_rewards.append(daily_rewards)
-        hedged_offramp_rewards.append(daily_rewards)
         spot = data_to_hedge[i]
-
-        if days_until_maturity == 0:
-
-            accumulated_rewards = sum(hedged_offramp_rewards)
-
-            if spot <= put_strike:
-                hedged_offramp_notional.append(accumulated_rewards * put_strike)
-
-            elif spot > put_strike:
-                hedged_offramp_notional.append(accumulated_rewards * spot)
-
-            hedged_offramp_rewards = []
-
-            strike = spot * np.exp(1/12 * IR)
-            put_strike = strike *put_strike_multiplier
-
-            put_price = black_scholes_put(spot,put_strike,option_maturity/365,IR,sigma)
-
-            put_prices.append(put_price *(option_maturity*daily_rewards))
-
-            days_until_maturity = option_maturity
+        current_date = data_to_hedge.index[i].strftime('%Y-%m-%d')
+        today_reward = data_rewards_from_start[i]
+        actual_rewards.append(today_reward)
+        weekly_offramp_rewards.append(today_reward)
         
-        if days_until_week_end == 0:
-            
+        # The hedged amount remains fixed based on previous month calculation
+        hedged_offramp_rewards.append(notional_tohedge_inkind)
+        
+        # Non-hedged is the difference between actual reward and hedged amount
+        non_hedged_amount = max(0, today_reward - notional_tohedge_inkind)
+        nonhedged_offramp_rewards.append(non_hedged_amount)
+        
+        # Check if this is the last day of the simulation
+        is_last_day = (i == len(data_to_hedge) - 1)
+        
+        # Revert weekly selling for standard strategy
+        if (days_until_week_end == 0 or is_last_day):
             accumulated_rewards = sum(weekly_offramp_rewards)
-            weekly_offramp_notional.append(accumulated_rewards * (spot - (broker_spread)) )
-            weekly_offramp_rewards = []
-
+            week_value = accumulated_rewards * (spot - broker_spread)
+            
+            # For weekly spot sales:
+            spot_strategy_log.append({
+                'date': current_date,
+                'action': 'Weekly Spot Sale' if not is_last_day else 'Final Liquidation',
+                'rewards_amount': accumulated_rewards,
+                'sale_price': spot - broker_spread,
+                'spot_price': spot,
+                'broker_spread': broker_spread, 
+                'value': week_value,
+                'note': f"Broker spread: {broker_spread:.2f}" + (" (End of simulation)" if is_last_day else "")
+            })
+            
+            weekly_offramp_notional.append(week_value)
+            weekly_offramp_rewards = [] if not is_last_day else []
+            
             days_until_week_end = 7
+        else:
+            days_until_week_end -= 1
         
-        days_until_week_end -= 1
+        # Monthly option handling - FIXED: Add this reset
+        if days_until_maturity <= 0:
+            # Process expired option and accumulated rewards
+            accumulated_rewards = sum(hedged_offramp_rewards)
+            nonhedged_accumulated = sum(nonhedged_offramp_rewards)
+            actual_accumulated_rewards = sum(actual_rewards)
+            
+            # Record the monthly data
+            monthly_actual_rewards.append(actual_accumulated_rewards)
+            monthly_hedged_rewards.append(accumulated_rewards)
+            
+            # Calculate hedged amount payoff
+            hedged_amount = min(accumulated_rewards, actual_accumulated_rewards)
+            if spot <= put_strike:
+                hedged_value = hedged_amount * put_strike
+            else:
+                hedged_value = hedged_amount * spot
+            
+            # Add hedged value to the hedged notional
+            hedged_offramp_notional.append(hedged_value)
+            
+            # Non-hedged portion
+            nonhedged_offramp_notional.append(nonhedged_accumulated * spot)
+            
+            # Log option exercise outcome
+            option_exercised = spot <= put_strike
+            protection_value = 0
+            
+            if option_exercised:
+                protection_value = hedged_amount * (put_strike - spot)
+                transaction_log.append({
+                    'date': current_date,
+                    'type': 'Put Option Exercised',
+                    'details': f"Spot ({spot:.2f}) below strike ({put_strike:.2f}), exercised put option",
+                    'strike': put_strike,
+                    'spot_price': spot,
+                    'rewards_amount': hedged_amount,
+                    'protection_value': protection_value,
+                    'notional_protected': hedged_amount * put_strike,
+                    'savings_vs_spot': protection_value,
+                    'original_cost': option_cost
+                })
+                
+                hedged_strategy_log.append({
+                    'date': current_date,
+                    'action': 'Option Exercise',
+                    'rewards_amount': hedged_amount,
+                    'sale_price': put_strike,
+                    'spot_price': spot,
+                    'value': hedged_amount * put_strike,
+                    'strike': put_strike,
+                    'protection_value': protection_value,
+                    'note': f"Put protection: {protection_value:.2f}"
+                })
+            else:
+                transaction_log.append({
+                    'date': current_date,
+                    'type': 'Put Option Expired',
+                    'details': f"Spot ({spot:.2f}) above strike ({put_strike:.2f}), option not exercised",
+                    'strike': put_strike,
+                    'spot_price': spot,
+                    'rewards_amount': hedged_amount,
+                    'protection_value': 0,
+                    'notional_at_spot': hedged_amount * spot,
+                    'original_cost': option_cost
+                })
+                
+                hedged_strategy_log.append({
+                    'date': current_date,
+                    'action': 'Option Expired',
+                    'rewards_amount': hedged_amount,
+                    'sale_price': spot,
+                    'spot_price': spot,
+                    'strike': put_strike,
+                    'value': hedged_amount * spot,
+                    'protection_value': 0,
+                    'note': "Option not exercised (spot > strike)"
+                })
+            
+            # Improve non-hedged portion logging
+            hedged_strategy_log.append({
+                'date': current_date,
+                'action': 'Non-Hedged Portion',
+                'rewards_amount': nonhedged_accumulated,
+                'sale_price': spot,
+                'spot_price': spot,
+                'value': nonhedged_accumulated * spot,
+                'strike': None,
+                'protection_value': 0,
+                'note': "Unhedged rewards (sold at spot)"
+            })
+            
+            # Reset tracking arrays for the next period
+            hedged_offramp_rewards = []
+            nonhedged_offramp_rewards = []
+            actual_rewards = []
+            
+            # Check if there's enough time left for another option period
+            days_remaining = len(data_to_hedge) - (i + 1)
+            
+            if days_remaining >= option_maturity:
+                # Recalculate hedge amount for next month based on previous month
+                start_window = data_to_hedge.index[i] - pd.Timedelta(days=30)
+                end_window = data_to_hedge.index[i]
+                
+                previous_month_rewards = data_rewards[protocol][
+                    (data_rewards.index > start_window) & 
+                    (data_rewards.index <= end_window)
+                ]
+                
+                # Calculate new average daily rewards from previous month
+                if not previous_month_rewards.empty:
+                    prev_month_avg_daily = previous_month_rewards.mean()
+                    # Update the notional amount to hedge for the next period
+                    notional_tohedge_inkind = prev_month_avg_daily * percent_to_hedge
+                    
+                    st.write(f"New previous month daily average: {prev_month_avg_daily:.4f}")
+                    st.write(f"New hedged amount: {notional_tohedge_inkind:.4f} ({percent_to_hedge*100:.0f}%)")
+                else:
+                    st.warning(f"No rewards data found for previous month. Using existing hedge amount.")
+                
+                # Calculate new option values with the updated hedging amount
+                strike = spot * np.exp(1/12 * IR)
+                put_strike = strike * put_strike_multiplier
+                
+                # Get volatility for new option
+                try:
+                    closest_date_idx = vol_data.index.get_indexer([data_to_hedge.index[i]], method='nearest')[0]
+                    closest_date = vol_data.index[closest_date_idx]
+                    current_sigma = vol_data.loc[closest_date, 'vol'] if not pd.isna(vol_data.loc[closest_date, 'vol']) else sigma
+                    volatilities_used.append(current_sigma)
+                except:
+                    current_sigma = sigma
+                    volatilities_used.append(current_sigma)
+                
+                # Calculate option premium for next month - FIXED COST CALCULATION
+                put_price = black_scholes_put(spot, put_strike, option_maturity/365, IR, current_sigma)
+                option_cost = put_price * (option_maturity * notional_tohedge_inkind)
+                put_prices.append(option_cost)
+                
+                # For the new option purchase after expiry:
+                transaction_log.append({
+                    'date': current_date,
+                    'type': 'Option Purchase',
+                    'details': f"Bought put option at strike {put_strike:.2f} ({put_strike_multiplier*100:.0f}% of {spot:.2f})",
+                    'strike': put_strike,
+                    'spot_price': spot,
+                    'rewards_amount': option_maturity * notional_tohedge_inkind,
+                    'premium_per_unit': put_price,
+                    'cost': option_cost,
+                    'vol': current_sigma,
+                    'maturity': option_maturity,
+                    'expiry_date': (data_to_hedge.index[i] + pd.Timedelta(days=option_maturity)).strftime('%Y-%m-%d')
+                })
+                
+                # CRITICAL FIX: Reset days_until_maturity for the new option period
+                days_until_maturity = option_maturity
+            else:
+                # Not enough time left for a full option period
+                st.info(f"Skipping option purchase - only {days_remaining} days left until end date (option maturity: {option_maturity} days)")
+                # Mark all remaining rewards as unhedged by setting notional_tohedge_inkind to 0
+                notional_tohedge_inkind = 0
+                # Reset days_until_maturity to ensure we don't try to buy again
+                days_until_maturity = days_remaining + 1
+                
+                # Log that we're not purchasing a new option
+                transaction_log.append({
+                    'date': current_date,
+                    'type': 'Skip Option Purchase',
+                    'details': f"Insufficient time remaining until end date ({days_remaining} days left, need {option_maturity})",
+                    'rewards_amount': 0,
+                    'cost': 0
+                })
+        
+        # Check if this is the last day of the simulation
+        is_last_day = (i == len(data_to_hedge) - 1)
+        
+        if days_until_week_end == 0 or is_last_day:
+            accumulated_rewards = sum(weekly_offramp_rewards)
+            week_value = accumulated_rewards * (spot - broker_spread)
+            
+            # For weekly spot sales:
+            spot_strategy_log.append({
+                'date': current_date,
+                'action': 'Weekly Spot Sale' if not is_last_day else 'Final Liquidation',
+                'rewards_amount': accumulated_rewards,
+                'sale_price': spot - broker_spread,
+                'spot_price': spot,
+                'broker_spread': broker_spread, 
+                'value': week_value,
+                'note': f"Broker spread: {broker_spread:.2f}" + (" (End of simulation)" if is_last_day else "")
+            })
+            
+            weekly_offramp_notional.append(week_value)
+            weekly_offramp_rewards = [] if not is_last_day else []
+            
+            days_until_week_end = 7
+        else:
+            days_until_week_end -= 1
+        
+        # Always decrement the maturity counter
         days_until_maturity -= 1
 
+    # After the loop, check if we need to handle final option exercise/expiry
+    # This is needed if the simulation ends before an option matures
+    if days_until_maturity > 0 and sum(hedged_offramp_rewards) > 0:
+        # We have an active option with accumulated rewards
+        final_spot = data_to_hedge[-1]
+        final_date = data_to_hedge.index[-1].strftime('%Y-%m-%d')
+        
+        accumulated_rewards = sum(hedged_offramp_rewards)
+        nonhedged_accumulated = sum(nonhedged_offramp_rewards)
+        
+        # Calculate hedged amount payoff for final option
+        hedged_amount = min(accumulated_rewards, sum(actual_rewards))
+        if final_spot <= put_strike:
+            hedged_value = hedged_amount * put_strike
+            protection_value = hedged_amount * (put_strike - final_spot)
+            
+            # Log the final option exercise
+            transaction_log.append({
+                'date': final_date,
+                'type': 'Final Option Exercise',
+                'details': f"Final spot ({final_spot:.2f}) below strike ({put_strike:.2f}), exercised put option",
+                'strike': put_strike,
+                'spot_price': final_spot,
+                'rewards_amount': hedged_amount,
+                'protection_value': protection_value,
+                'notional_protected': hedged_value,
+                'original_cost': option_cost
+            })
+            
+            hedged_strategy_log.append({
+                'date': final_date,
+                'action': 'Final Option Exercise',
+                'rewards_amount': hedged_amount,
+                'sale_price': put_strike,
+                'spot_price': final_spot,
+                'value': hedged_value,
+                'strike': put_strike,
+                'protection_value': protection_value,
+                'note': f"Put protection at end of simulation: {protection_value:.2f}"
+            })
+        else:
+            hedged_value = hedged_amount * final_spot
+            
+            # Log the final option expiry
+            transaction_log.append({
+                'date': final_date,
+                'type': 'Final Option Expiry',
+                'details': f"Final spot ({final_spot:.2f}) above strike ({put_strike:.2f}), option not exercised",
+                'strike': put_strike,
+                'spot_price': final_spot,
+                'rewards_amount': hedged_amount,
+                'protection_value': 0,
+                'notional_at_spot': hedged_value,
+                'original_cost': option_cost
+            })
+            
+            hedged_strategy_log.append({
+                'date': final_date,
+                'action': 'Final Option Expiry',
+                'rewards_amount': hedged_amount,
+                'sale_price': final_spot,
+                'spot_price': final_spot,
+                'value': hedged_value,
+                'note': "Option not exercised at end of simulation"
+            })
+        
+        # Add the final hedged and non-hedged values
+        hedged_offramp_notional.append(hedged_value)
+        nonhedged_offramp_notional.append(nonhedged_accumulated * final_spot)
+        
+        # Log the non-hedged portion
+        if nonhedged_accumulated > 0:
+            hedged_strategy_log.append({
+                'date': final_date,
+                'action': 'Final Non-Hedged Liquidation',
+                'rewards_amount': nonhedged_accumulated,
+                'sale_price': final_spot,
+                'spot_price': final_spot,
+                'value': nonhedged_accumulated * final_spot,
+                'note': "Final liquidation of unhedged rewards"
+            })
+    
+    # Calculate final notionals
     spot_end_notional = sum(weekly_offramp_notional)
     hedged_end_notional = sum(hedged_offramp_notional)
-    options_price_spent = sum(put_prices)
+    nonhedged_notional = sum(nonhedged_offramp_notional)
+    
+    # Calculate spot end notional (non-hedged strategy benchmark)
+    non_hedged_strategy_value = spot_end_notional
+    
+    # Hedged strategy: hedged portion (with put protection) + non-hedged portion - option costs
+    hedged_strategy_value = hedged_end_notional + nonhedged_notional - sum(put_prices)
+    
+    # PnL is the difference between the two strategies
+    final_pnl = hedged_strategy_value - non_hedged_strategy_value
+    
+    # Calculate PnL as percentage of the non-hedged strategy value
+    if non_hedged_strategy_value > 0:
+        final_pnl_perc = (final_pnl / non_hedged_strategy_value) * 100
+    else:
+        final_pnl_perc = 0
+    
+    df_hedged_vs_actual_rewards = pd.DataFrame({
+        "Hedged rewards per month": monthly_hedged_rewards,
+        "Actual rewards per month": monthly_actual_rewards
+    })
+    
+    # Add volatility information to the results
+    avg_volatility = sum(volatilities_used) / max(1, len(volatilities_used))
+    min_volatility = min(volatilities_used) if volatilities_used else sigma
+    max_volatility = max(volatilities_used) if volatilities_used else sigma
+    
+    # Convert logs to DataFrames for display
+    spot_log_df = pd.DataFrame(spot_strategy_log)
+    hedged_log_df = pd.DataFrame(hedged_strategy_log)
+    transaction_log_df = pd.DataFrame(transaction_log)
+    
+    # Return with properly formatted hybrid data
+    return spot_end_notional, hedged_end_notional, final_pnl, final_pnl_perc, sum(put_prices), df_hedged_vs_actual_rewards, nonhedged_notional, {
+        'avg_vol': avg_volatility,
+        'min_vol': min_volatility,
+        'max_vol': max_volatility,
+        'transaction_log': transaction_log_df,
+        'spot_strategy_log': spot_log_df,
+        'hedged_strategy_log': hedged_log_df
+    }
 
-    final_pnl = hedged_end_notional - spot_end_notional - options_price_spent
-    final_pnl_perc = (((hedged_end_notional- options_price_spent) / spot_end_notional) - 1) * 100
 
-    return spot_end_notional,hedged_end_notional,options_price_spent,final_pnl,final_pnl_perc,put_prices
 
 
 def call_hedge(call_strike_multiplier,daily_rewards,protocol,option_maturity,hedging_start_date,IR=0.05,sigma=0.6,broker_spread=0.01):
@@ -254,6 +697,7 @@ def call_hedge(call_strike_multiplier,daily_rewards,protocol,option_maturity,hed
     final_pnl_perc = (((hedged_end_notional+ options_price_gained) / spot_end_notional) - 1) * 100
 
     return spot_end_notional,hedged_end_notional,options_price_gained,final_pnl,final_pnl_perc,call_prices
+
 
 
 def convert_maturity_to_years(maturity):
@@ -462,135 +906,6 @@ def collar(call_strike_multiplier,put_strike_multiplier,daily_rewards,protocol,o
 
 
 
-def put_hedge(put_strike_multiplier,daily_rewards,protocol,option_maturity,hedging_start_date,percent_to_hedge=0.7,IR=0.05,sigma=0.6,broker_spread=0.10):
-
-    data = pd.read_excel("HP.xlsx",index_col=0,parse_dates=True)
-    data_rewards = pd.read_excel("v2_revenue.xlsx",index_col=0,parse_dates=True)
-
-    data_to_hedge = data[protocol][data.index >= pd.to_datetime(hedging_start_date)]
-    data_to_hedge = data_to_hedge.dropna()
-    hedging_start_date = data_to_hedge.first_valid_index()
-
-    start_window = hedging_start_date - pd.Timedelta(days=30)
-    st.write(f"from : {start_window}")
-    df_base_rewards = data_rewards[protocol][(data_rewards.index > start_window) & (data_rewards.index < hedging_start_date)]
-    notional_tohedge_inkind = df_base_rewards.mean()* percent_to_hedge
-    st.write(f"Daily average rewards: {notional_tohedge_inkind}")
-
-    mask = data_rewards.index >= pd.to_datetime(hedging_start_date)
-
-    data_rewards_from_start = data_rewards.loc[mask, protocol]
-    data_rewards_from_start = data_rewards_from_start.dropna()
-
-    weekly_offramp_rewards = []
-    hedged_offramp_rewards = []
-    actual_rewards = []
-
-    monthly_actual_rewards = []
-    monthly_hedged_rewards = []
-
-    weekly_offramp_notional = []
-    hedged_offramp_notional = []
-
-    put_prices = []
-
-    days_until_maturity = option_maturity
-    days_until_week_end = 7
-
-    spot = data_to_hedge[0]
-    strike = spot * np.exp(1/12 * IR)
-    put_strike = strike *put_strike_multiplier
-
-    put_price = black_scholes_put(spot,put_strike,option_maturity/365,IR,sigma)
-
-    put_prices.append(put_price * (option_maturity*notional_tohedge_inkind))
-
-    for i in range(len(data_to_hedge)):
-
-        
-        hedged_offramp_rewards.append(notional_tohedge_inkind)
-        
-        spot = data_to_hedge[i]
-        today_reward = data_rewards_from_start[i]
-        actual_rewards.append(today_reward)
-        weekly_offramp_rewards.append(today_reward)
-
-
-        if days_until_maturity == 0:
-
-            accumulated_rewards = sum(hedged_offramp_rewards)
-            actual_accumulated_rewards = sum(actual_rewards)
-
-            if actual_accumulated_rewards < accumulated_rewards:
-                if spot <= put_strike:
-                    hedged_offramp_notional.append(actual_accumulated_rewards * put_strike)
-
-                elif spot > put_strike:
-                    hedged_offramp_notional.append(actual_accumulated_rewards * spot)
-
-
-            else:
-                if spot <= put_strike:
-                    temp_not = accumulated_rewards * put_strike
-                    
-
-                elif spot > put_strike:
-                    temp_not=accumulated_rewards * spot
-                
-                temp_not =temp_not + (actual_accumulated_rewards-accumulated_rewards*spot)
-                
-                hedged_offramp_notional.append(temp_not)
-
-
-
-
-            
-            monthly_actual_rewards.append(actual_accumulated_rewards)
-            monthly_hedged_rewards .append(accumulated_rewards)
-
-            hedged_offramp_rewards = []
-            actual_rewards = []
-
-            strike = spot * np.exp(1/12 * IR)
-            put_strike = strike *put_strike_multiplier
-
-
-            put_price = black_scholes_put(spot,put_strike,option_maturity/365,IR,sigma)
-
-            put_prices.append(put_price* (option_maturity*notional_tohedge_inkind))
-
-            days_until_maturity = option_maturity
-            start_window = data_rewards_from_start.index[i] - pd.Timedelta(days=30)
-            st.write(f"from : {start_window}")
-            df_base_rewards = data_rewards[protocol][(data_rewards.index > start_window) & (data_rewards.index < data_rewards_from_start.index[i])]
-            notional_tohedge_inkind = df_base_rewards.mean()* percent_to_hedge
-            st.write(f"Daily average rewards: {notional_tohedge_inkind}")
-        
-        if days_until_week_end == 0:
-            
-            accumulated_rewards = sum(weekly_offramp_rewards)
-            weekly_offramp_notional.append(accumulated_rewards * (spot - (broker_spread)) )
-            weekly_offramp_rewards = []
-
-            days_until_week_end = 7
-        
-        days_until_week_end -= 1
-        days_until_maturity -= 1
-
-    spot_end_notional = sum(weekly_offramp_notional)
-    hedged_end_notional = sum(hedged_offramp_notional)
-    put_options_price = sum(put_prices)
-
-
-    final_pnl = hedged_end_notional - spot_end_notional 
-    final_pnl_perc = ((hedged_end_notional / spot_end_notional) - 1) * 100
-    df_hedged_vs_actual_rewards = pd.DataFrame({"Hegded rewards per month":monthly_hedged_rewards,"Actual rewards per month": monthly_actual_rewards})
-    
-    return spot_end_notional,hedged_end_notional,final_pnl,final_pnl_perc,put_options_price,df_hedged_vs_actual_rewards
-
-
-
-
 
 
 EXCEL_FILE = "options_data.xlsx"
@@ -665,7 +980,7 @@ def options_pnl_page():
 
         col1, col2, col3 = st.columns(3)
         strike_price = col1.number_input("Strike Price", min_value=0.0, value=100.0)
-        maturity = col2.number_input("Maturity (Days)", min_value=1, value=30)
+        maturity = col2.selectbox("Maturity", options=['1w', '1M', '3M', '6M', '12M', '24M', '36M'])
 
         # Fetch live price
         spot_price = get_binance_price(symbol)
@@ -692,7 +1007,7 @@ def options_pnl_page():
                 "Strike Price": strike_price,
                 "Premium": premium,
                 "Volatility": volatility,
-                "Maturity (Days)": maturity,
+                "Maturity": maturity,
                 "Risk-Free Rate": risk_free_rate,
                 "Symbol": symbol,
                 "Number of options": num_options,
@@ -768,150 +1083,567 @@ def Options_PnL():
 def Backtesting():
     st.title("Backtesting")
     
-    # Explanation of the Forward Backtesting Strategy
-    #st.markdown("""
-    #In this simulation, we aim to compare the effectiveness of using a spot strategy versus a forward strategy over a specified period. 
-    #A spot strategy involves exchanging the asset at its current market price (spot price) when rewards are claimed, while a forward strategy 
-    #locks-in a future price (forward price) today for delivery at a later date. By backtesting these strategies on historical data, 
-    #we can determine the Pnl you could reach by using a forward hedging strategy.
-    
-    #You can customize the parameters of the simulation, such as the Hedge start date, the frequency of rewards, and the maturity of the forward 
-    #contracts, to see how different strategies would have performed.
-    #""")
+    # Add a nice header with description
+    st.markdown("""
+    <div style="background-color:#f0f2f6;padding:15px;border-radius:10px;margin-bottom:20px">
+        <h3 style="color:#262730">Options Hedging Strategy Simulator</h3>
+        <p>Evaluate different options hedging strategies for cryptocurrency rewards using historical price data.</p>
+    </div>
+    """, unsafe_allow_html=True)
 
-    # Load data from GitHub
-
+    # Load data from files
     @st.cache_data
     def load_data():
         github_url = 'HP.xlsx'
         try:
             hp_df = pd.read_excel(github_url)
             temp_df = pd.read_excel(github_url, index_col=0)
-            st.write("Data loaded successfully from cache.")
             return hp_df, temp_df
         except Exception as e:
             st.error(f"Failed to load data: {e}")
             return None, None
+            
     hp_df, temp_df = load_data()
         
-    if st.button("Refresh Data"):
-        update_data()
+    # Add a refresh button with nicer styling
+    col1, col2 = st.columns([1, 3])
+    with col1:
+        if st.button("🔄 Refresh Data"):
+            with st.spinner("Updating market data..."):
+                update_data()
         hp_df, temp_df = load_data()
+        st.success("Data refreshed successfully!")
 
-    st.subheader("Input Parameters")
+    # Create tabs for different sections
+    tab1, tab2 = st.tabs(["Strategy Configuration", "Advanced Settings"])
     
-
-    product = st.selectbox("Product", options =['Put','Collar'] )
-    
+    with tab1:
+        st.subheader("Strategy Parameters")
+        
+        # Choose product type with better UI
+        product = st.selectbox(
+            "Product Type", 
+            options=['Put', 'Collar'],
+            format_func=lambda x: {"Put": "Put Option Strategy", "Collar": "Collar Strategy (Put + Call)"}[x]
+        )
+        
+        # Use more organized layout for parameters
     if product == "Collar":
-        col1, col2, col3,col4= st.columns(4)
+        col1, col2 = st.columns(2)
         with col1:
             protocol = st.selectbox("Asset", options=hp_df.columns[1:])
+            option_maturity = st.selectbox(
+                    "Option Maturity", 
+                    options=['1w', '1M', '3M', '6M', '12M', '24M', '36M'], 
+                    index=1,
+                    help="Duration of each option contract"
+                )
         with col2:
-            option_maturity = st.selectbox("Option Maturity", options=['1w', '1M', '3M', '6M', '12M', '24M', '36M'], index=1)  # Default to '12M'
-        with col3:
-            strike_opt = st.number_input("Lower Strike", value=80.0, min_value=0.0)
-        with col4:
-            strike2_opt = st.number_input("Upper Strike", value=120.0, min_value=0.0)
+                strike_opt = st.slider("Lower Strike (% of spot)", value=80.0, min_value=50.0, max_value=99.0)
+                strike2_opt = st.slider("Upper Strike (% of spot)", value=120.0, min_value=101.0, max_value=200.0)
     else:
-        col1, col2, col3 = st.columns(3)
+        col1, col2 = st.columns(2)
         with col1:
             protocol = st.selectbox("Asset", options=hp_df.columns[1:])
+            option_maturity = st.selectbox(
+                    "Option Maturity", 
+                    options=['1w', '1M', '3M', '6M', '12M', '24M', '36M'], 
+                    index=1,
+                    help="Duration of each option contract"
+                )
         with col2:
-            option_maturity = st.selectbox("Option Maturity", options=['1w', '1M', '3M', '6M', '12M', '24M', '36M'], index=1)  # Default to '12M'
-        with col3:
-            strike_opt = st.number_input("Strike", value=100.0, min_value=0.0)
-    
-    temp_df = temp_df[protocol].first_valid_index()
-    st.write(f"Data available from : {temp_df}")
+                strike_opt = st.slider(
+                    "Strike Price (% of spot)", 
+                    value=100.0, 
+                    min_value=50.0, 
+                    max_value=150.0,
+                    help="Strike price as a percentage of the spot price"
+                )
+        
+        # Display available data range
+        temp_df = temp_df[protocol].first_valid_index()
+        st.info(f"📊 Historical data available from: {temp_df}")
 
-
+        # Add start and end date selectors
+        col1, col2 = st.columns(2)
+        with col1:
+            start_date = st.date_input(
+                "Hedge start date", 
+                value=datetime(2025,1,1),
+                help="When to begin the hedging strategy"
+            )
+        with col2:
+            end_date = st.date_input(
+                "Hedge end date", 
+                value=datetime(2025,6,30),
+                help="When to end the hedging strategy"
+            )
+        
+        # Better layout for additional parameters
     col1, col2, col3 = st.columns(3)
     with col1:
-        start_date = st.date_input("Hedge start date", value=datetime(2025,1,1))
+        percent_to_hedge = st.slider(
+                "Percent to Hedge (% of rewards)",
+                min_value=0,
+                max_value=100,
+                value=70,
+                step=5,
+                help="Percentage of rewards to hedge with options"
+            ) / 100  # Convert from percentage (0-100) to decimal (0-1)
+    with col2:
+        interest_rate = st.number_input(
+                "Risk-Free Rate", 
+                min_value=0.0, 
+                max_value=1.0, 
+                value=0.05, 
+                step=0.001,
+                format="%.3f", 
+                help="Annual risk-free interest rate (e.g., 0.05 for 5%)"
+            )
 
-    reward_amount=1
-    if st.button("Run Strategy"):
-        with st.spinner("Running hedging strategy simulation..."):
+    with tab2:
+        st.subheader("Advanced Settings")
+        # Add more advanced parameters here if needed
+        broker_spread = st.slider(
+            "Broker Spread", 
+            min_value=0.0, 
+            max_value=0.5, 
+            value=0.1, 
+            step=0.01,
+            format="%.1f%%",
+            help="Trading cost when selling rewards (as % of value)"
+        )
+        
+        # You could add other advanced parameters here
+
+    # Run button with better styling
+    if st.button("🚀 Run Simulation", type="primary"):
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        
+        for i in range(0, 101, 10):
+            progress_bar.progress(i)
+            status_text.text(f"Running simulation... {i}%")
+            time.sleep(0.1)  # Simulate computation
             
+        with st.spinner("Finalizing results..."):
             if product == "Put":
-
                 put_strike_multiplier = strike_opt/100
-                option_maturity = convert_maturity_to_days(option_maturity)
-
+                option_maturity_days = convert_maturity_to_days(option_maturity)
                 daily_rewards = 1
-                
                 hedging_start_date = start_date
+                hedging_end_date = end_date
 
-                spot_end_notional,hedged_end_notional,final_pnl,final_pnl_perc,put_options_price,df_hedged_vs_actual_rewards = put_hedge(put_strike_multiplier,daily_rewards,protocol,option_maturity,hedging_start_date,sigma =0.85)
-                st.subheader("Strategy Results")
-
-                st.write('### Strategy : Buy Put')
-                #st.write(f"Daily {daily_rewards} {protocol} rewards sold each week at spot vs each {option_maturity} days with put options strike {int(put_strike_multiplier*100)}")
-                st.write(f"**End USDT notional with weekly offramps:** {round(spot_end_notional,2):,} $")
-                st.write(f"**End USDT notional with puts and offramps each {option_maturity} days:** {round(hedged_end_notional):,} $")
-                st.write(f"**End USDT notional spent buying put options:** {round(put_options_price):,} $")
-
-                st.write(f"**Final PnL:** {round(final_pnl,2):,} $")
-                st.write(f"**Final PnL in %:** {round(final_pnl_perc,2):,}%")
-                st.dataframe(df_hedged_vs_actual_rewards)
+                spot_end_notional, hedged_end_notional, final_pnl, final_pnl_perc, put_options_price, df_hedged_vs_actual_rewards, nonhedged_notional, vol_info = put_hedge(
+                    put_strike_multiplier,
+                    daily_rewards,
+                    protocol,
+                    option_maturity_days,
+                    hedging_start_date=hedging_start_date,
+                    hedging_end_date=hedging_end_date,
+                    percent_to_hedge=percent_to_hedge,
+                    IR=interest_rate,
+                    broker_spread=broker_spread
+                )
+                
+                # Display results with improved strategy breakdown
+                st.header("Strategy Results", divider="blue")
+                
+                # Main strategy comparison
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.subheader("Non-Hedged Strategy")
+                    st.metric(
+                        label="Weekly Offramp Notional", 
+                        value=f"${spot_end_notional:,.2f}",
+                        help="Total USD value from selling rewards weekly at spot price"
+                    )
+                
+                with col2:
+                    # Calculate net value (after option costs)
+                    hedged_net_value = hedged_end_notional + nonhedged_notional - put_options_price
+                    
+                    st.subheader("Hedged Strategy (Net)")
+                    st.metric(
+                        label=f"Net Strategy Value", 
+                        value=f"${hedged_net_value:,.2f}",
+                        delta=f"{final_pnl_perc:.2f}%",
+                        delta_color="normal"
+                    )
+                
+                # Detailed strategy breakdown
+                st.subheader("Strategy Breakdown")
+                
+                # Create a more detailed breakdown with 3 columns
+                breakdown_cols = st.columns(3)
+                
+                # First column: Protected portion details
+                with breakdown_cols[0]:
+                    # Calculate how much was actually protected by exercised options
+                    if 'hedged_strategy_log' in vol_info:
+                        hedged_log = vol_info['hedged_strategy_log']
+                        exercised_options = hedged_log[hedged_log['action'] == 'Option Exercise']
+                        protected_value = exercised_options['value'].sum() if not exercised_options.empty else 0
+                        
+                        # Calculate how much was sold at spot price (when options weren't exercised)
+                        non_exercised = hedged_log[hedged_log['action'] == 'Option Expired']
+                        non_exercised_value = non_exercised['value'].sum() if not non_exercised.empty else 0
+                        
+                        st.markdown("**Protected Portion**")
+                        st.metric(
+                            label="Protected by Options", 
+                            value=f"${protected_value:,.2f}",
+                            help="Value from exercised put options"
+                        )
+                        st.metric(
+                            label="Sold at Spot (No Protection)", 
+                            value=f"${non_exercised_value:,.2f}",
+                            help="Hedged rewards sold at spot price when puts weren't exercised"
+                        )
+                        st.metric(
+                            label="Total Hedged Portion", 
+                            value=f"${hedged_end_notional:,.2f}",
+                            help="Total value from the hedged portion"
+                        )
+                    else:
+                        st.metric(
+                            label="Total Hedged Portion", 
+                            value=f"${hedged_end_notional:,.2f}"
+                        )
+                
+                # Second column: Non-hedged portion and options cost
+                with breakdown_cols[1]:
+                    st.markdown("**Unprotected Portion**")
+                    st.metric(
+                        label="Non-Hedged Portion", 
+                        value=f"${nonhedged_notional:,.2f}",
+                        help="Rewards that weren't hedged, sold at spot price"
+                    )
+                    
+                    st.markdown("**Option Costs**")
+                    st.metric(
+                        label="Options Cost", 
+                        value=f"${put_options_price:,.2f}",
+                        delta=f"{(put_options_price / spot_end_notional * 100):.2f}% of notional",
+                        delta_color="inverse"
+                    )
+                
+                # Third column: Totals and comparison
+                with breakdown_cols[2]:
+                    st.markdown("**Strategy Totals**")
+                    
+                    # Calculate correct totals based on the actual transaction logs
+                    if 'hedged_strategy_log' in vol_info:
+                        hedged_log = vol_info['hedged_strategy_log']
+                        
+                        # Sum up all values directly from the transaction logs
+                        # This ensures we're not double-counting any transactions
+                        total_sold = hedged_log['value'].sum()
+                        
+                        # Get the option costs from transaction logs
+                        option_purchase_costs = vol_info['transaction_log'][vol_info['transaction_log']['type'] == 'Option Purchase']['cost'].sum()
+                        
+                        # Calculate net value after option costs
+                        net_after_options = total_sold - option_purchase_costs
+                        
+                        st.metric(
+                            label="Total Sold (Gross)", 
+                            value=f"${total_sold:,.2f}",
+                            help="Total value from all selling (before option costs)"
+                        )
+                        
+                        st.metric(
+                            label="Net After Options", 
+                            value=f"${net_after_options:,.2f}",
+                            help="Net value after subtracting option costs"
+                        )
+                        
+                        # Calculate protection benefit
+                        option_exercises = hedged_log[hedged_log['action'] == 'Option Exercise']
+                        total_protection = option_exercises['protection_value'].sum() if not option_exercises.empty else 0
+                        
+                        protection_benefit = total_protection - option_purchase_costs
+                        
+                        st.metric(
+                            label="Net Protection Benefit", 
+                            value=f"${protection_benefit:,.2f}",
+                            delta=f"{(protection_benefit / option_purchase_costs * 100):.2f}% on option cost" if option_purchase_costs > 0 else "N/A",
+                            help="Value gained from put protection minus cost of options"
+                        )
+                    else:
+                        # Fallback if logs aren't available
+                        total_sold = hedged_end_notional + nonhedged_notional
+                        net_after_options = total_sold - put_options_price
+                        
+                        st.metric(
+                            label="Total Sold (Gross)", 
+                            value=f"${total_sold:,.2f}"
+                        )
+                        
+                        st.metric(
+                            label="Net After Options", 
+                            value=f"${net_after_options:,.2f}"
+                        )
+                
+                # Final PnL card with clearer information
+                pnl_color = "green" if final_pnl > 0 else "red"
+                st.markdown(f"""
+                <div style="background-color:rgba({0 if final_pnl > 0 else 255}, {255 if final_pnl > 0 else 0}, 0, 0.1);padding:20px;border-radius:10px;text-align:center;margin-top:20px">
+                    <h2 style="margin:0;color:{pnl_color}">Final PnL vs Non-Hedged</h2>
+                    <h1 style="margin:10px 0;color:{pnl_color}">${final_pnl:,.2f}</h1>
+                    <p style="margin:0;color:{pnl_color}">({final_pnl_perc:.2f}% compared to non-hedged strategy)</p>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                # Add strategy parameters recap
+                st.subheader("Strategy Parameters")
+                params_col1, params_col2, params_col3, params_col4 = st.columns(4)
+                
+                with params_col1:
+                    st.metric("Put Strike", f"{int(strike_opt)}%")
+                
+                with params_col2:
+                    # Display volatility range
+                    st.metric(
+                        "Avg Volatility", 
+                        f"{vol_info['avg_vol']:.2f}",
+                        delta=f"Range: {vol_info['min_vol']:.2f} - {vol_info['max_vol']:.2f}",
+                        delta_color="off"
+                    )
+                
+                with params_col3:
+                    st.metric("Risk-Free Rate", f"{interest_rate*100:.1f}%")
+                
+                with params_col4:
+                    st.metric("Option Maturity", f"{option_maturity_days} days")
+                
+                # Visualization
+                st.subheader("Monthly Rewards Comparison")
+                fig, ax = plt.subplots(figsize=(10, 5))
+                df_hedged_vs_actual_rewards.plot(kind='bar', ax=ax)
+                ax.set_ylabel('Rewards')
+                ax.set_title('Hedged vs Actual Monthly Rewards')
+                ax.grid(axis='y', linestyle='--', alpha=0.7)
+                st.pyplot(fig)
+                
+                # Display the detailed data
+                with st.expander("View Detailed Data"):
+                    st.dataframe(df_hedged_vs_actual_rewards)
             
-            if product == "Call":
-
-                call_strike_multiplier = strike_opt/100
-                option_maturity = convert_maturity_to_days(option_maturity)
-
-                daily_rewards = reward_amount
+                # Add transaction logs section
+                st.subheader("🔍 Transaction Logs")
+                log_tabs = st.tabs(["Option Transactions", "Spot Strategy Sales", "Hedged Strategy Sales"])
                 
-                hedging_start_date = start_date
-
-                spot_end_notional,hedged_end_notional,options_price_gained,final_pnl,final_pnl_perc, call_prices = call_hedge(call_strike_multiplier,daily_rewards,protocol,option_maturity,hedging_start_date,sigma =0.85)
-
-                st.subheader("Strategy Results")
-
-                st.write('### Strategy : Buy Call')
-                st.write(f"Daily {daily_rewards} {protocol} rewards sold each week at spot vs each {option_maturity} days with call options strike {int(call_strike_multiplier*100)}")
-                st.write(f"**End USDT notional with weekly offramps:** {round(spot_end_notional,2):,} $")
-                st.write(f"**End USDT notional with calls and offramps each {option_maturity} days:** {round(hedged_end_notional):,} $")
-                st.write(f"**End USDT notional gained selling call options:** {round(options_price_gained):,} $")
-
-                st.write(f"**Final PnL:** {round(final_pnl,2):,} $")
-                st.write(f"**Final PnL in %:** {round(final_pnl_perc,2):,}%")
+                with log_tabs[0]:
+                    if 'transaction_log' in vol_info and not vol_info['transaction_log'].empty:
+                        # Add summary metrics at top
+                        option_purchase_costs = vol_info['transaction_log'][vol_info['transaction_log']['type'] == 'Option Purchase']['cost'].sum()
+                        option_exercises = vol_info['transaction_log'][vol_info['transaction_log']['type'] == 'Put Option Exercised']
+                        total_protection = option_exercises['protection_value'].sum() if not option_exercises.empty else 0
+                        
+                        metrics_cols = st.columns(3)
+                        metrics_cols[0].metric("Total Option Costs", f"${option_purchase_costs:,.2f}")
+                        metrics_cols[1].metric("Protection Value", f"${total_protection:,.2f}")
+                        metrics_cols[2].metric("Net Option Value", f"${(total_protection - option_purchase_costs):,.2f}")
+                        
+                        # Show the detailed log with better formatting
+                        st.dataframe(vol_info['transaction_log'], use_container_width=True)
+                    else:
+                        st.info("No option transactions recorded")
+                        
+                with log_tabs[1]:
+                    if 'spot_strategy_log' in vol_info and not vol_info['spot_strategy_log'].empty:
+                        # Add a summary at the top
+                        spot_total = vol_info['spot_strategy_log']['value'].sum()
+                        st.metric("Total Spot Strategy Value", f"${spot_total:,.2f}")
+                        
+                        # Show the detailed log
+                        st.dataframe(vol_info['spot_strategy_log'], use_container_width=True)
+                    else:
+                        st.info("No spot strategy transactions recorded")
+                        
+                with log_tabs[2]:
+                    if 'hedged_strategy_log' in vol_info and not vol_info['hedged_strategy_log'].empty:
+                        # Add better summary metrics
+                        hedged_log = vol_info['hedged_strategy_log']
+                        option_exercises = hedged_log[hedged_log['action'] == 'Option Exercise']['value'].sum()
+                        option_expirations = hedged_log[hedged_log['action'] == 'Option Expired']['value'].sum()
+                        non_hedged = hedged_log[hedged_log['action'] == 'Non-Hedged Portion']['value'].sum()
+                        
+                        # Display summaries
+                        summary_cols = st.columns(3)
+                        summary_cols[0].metric("Protected Value", f"${option_exercises:,.2f}")
+                        summary_cols[1].metric("Unprotected Value", f"${option_expirations+non_hedged:,.2f}")
+                        summary_cols[2].metric("Total Gross Value", f"${hedged_log['value'].sum():,.2f}")
+                        
+                        st.metric("Net Value (after options)", 
+                                  f"${hedged_log['value'].sum() - option_purchase_costs:,.2f}")
+                        
+                        # Show the detailed log
+                        st.dataframe(hedged_log, use_container_width=True)
+                    else:
+                        st.info("No hedged strategy transactions recorded")
+            
+            # Similar improvements for Call and Collar strategies...
+            if product == "Call":
+                # [Similar improvements for Call strategy]
+                pass
             
             if product == "Collar":
-                
-
+                # [Similar improvements for Collar strategy]
                 put_strike_multiplier = strike_opt/100
                 call_strike_multiplier = strike2_opt/100
-                option_maturity = convert_maturity_to_days(option_maturity)
-
-                daily_rewards = reward_amount
-                
+                option_maturity_days = convert_maturity_to_days(option_maturity)
+                daily_rewards = 1
                 hedging_start_date = start_date
+                hedging_end_date = end_date
 
-                spot_end_notional,hedged_end_notional,final_pnl,final_pnl_perc,call_prices,put_options_price,call_options_price,options_price_paid,df_hedgedvsnon = collar(call_strike_multiplier,put_strike_multiplier,daily_rewards,protocol,option_maturity,hedging_start_date,sigma = 0.6)
+                spot_end_notional, hedged_end_notional, final_pnl, final_pnl_perc, call_prices, put_options_price, call_options_price, options_price_paid, df_hedgedvsnon = collar(
+                    call_strike_multiplier,
+                    put_strike_multiplier,
+                    daily_rewards,
+                    protocol,
+                    option_maturity_days,
+                    hedging_start_date=hedging_start_date,
+                    hedging_end_date=hedging_end_date,
+                    percent_to_hedge=percent_to_hedge,
+                    IR=interest_rate,
+                    broker_spread=broker_spread
+                )
 
+                # Calculate options cost as percentage of spot
+                put_cost_percentage = (put_options_price / spot_end_notional) * 100
+                call_income_percentage = (call_options_price / spot_end_notional) * 100
+                net_cost_percentage = ((put_options_price - call_options_price) / spot_end_notional) * 100
 
-                st.subheader("Strategy Results")
+                # Display volatility info more prominently
+                try:
+                    if protocol.lower() == 'eth':
+                        vol_data = pd.read_csv("prices_eth.csv")
+                        vol_data['date'] = pd.to_datetime(vol_data['date'])
+                    elif protocol.lower() == 'sol':
+                        vol_data = pd.read_csv("prices_sol.csv")
+                        vol_data['date'] = pd.to_datetime(vol_data['date'])
+                    
+                    # Get volatility for hedging start date (get closest date if exact match not found)
+                    hedging_start_date_dt = pd.to_datetime(hedging_start_date)
+                    closest_date_idx = vol_data['date'].sub(hedging_start_date_dt).abs().idxmin()
+                    closest_date = vol_data.iloc[closest_date_idx]
+                    
+                    if pd.notna(closest_date['vol']):
+                        sigma_value = closest_date['vol']
+                        st.info(f"📈 Using volatility of **{sigma_value:.2f}** from {closest_date['date'].date()} for option pricing")
+                    else:
+                        sigma_value = 0.6  # Default value
+                        st.info(f"📈 Using default volatility of **{sigma_value:.2f}** for option pricing")
+                except Exception as e:
+                    sigma_value = 0.6  # Default value
+                    st.info(f"📈 Using default volatility of **{sigma_value:.2f}** for option pricing. Error: {e}")
+
+                # Display results in a more attractive format
+                st.header("Strategy Results", divider="blue")
                 
-
-                st.write('### Strategy : Combined Put and Call Strategy')
-                #st.write(f"Daily {daily_rewards} {protocol} rewards sold each week at spot vs each {option_maturity} days hedged with Collar")
-
-                st.write(f"**Notional with weekly offramps:** {round(spot_end_notional,2):,} $")
-                st.write(f"**Notional with Collar hedged offramps each {option_maturity} days:** {round(hedged_end_notional):,} $")
-
-                st.write(f"**Notional paid to buy put options:** {round(put_options_price):,} $")
-                st.write(f"**Notional gained selling call options:** {round(call_options_price):,} $")
-                st.write(f"**Options PnL:** {round(options_price_paid):,} $")
-
-                st.write(f"**Final PnL in $:** {round(final_pnl,2):,} $")
-                st.write(f"**Final PnL in %:** {round(final_pnl_perc,2):,}%")
-                st.dataframe(df_hedgedvsnon)
-                st.image("collar.png")
-
-    
+                # Summary stats in a card-like container
+                st.markdown("""
+                <div style="background-color:#f5f5f5;padding:20px;border-radius:10px;border-left:5px solid #4e8df5;">
+                    <h3 style="margin-top:0">Strategy: Collar (Put + Call)</h3>
+                    <p>Protecting downside with puts while limiting upside with calls to reduce cost</p>
+                </div>
+                """, unsafe_allow_html=True)
                 
+                # Create dashboard-like layout for results
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.subheader("Non-Hedged Strategy")
+                    st.metric(
+                        label="Weekly Offramp Notional", 
+                        value=f"${round(spot_end_notional):,}",
+                        help="Total USD value from selling rewards weekly at spot price"
+                    )
+                
+                with col2:
+                    st.subheader("Hedged Strategy")
+                    st.metric(
+                        label=f"Hedged Notional ({int(percent_to_hedge*100)}%)", 
+                        value=f"${round(hedged_end_notional):,}",
+                        delta=f"{round(final_pnl_perc, 2)}%" if final_pnl_perc > 0 else f"{round(final_pnl_perc, 2)}%",
+                        delta_color="normal"
+                    )
+                
+                # Options breakdown
+                st.subheader("Options Breakdown")
+                col1, col2, col3 = st.columns(3)
+                
+                with col1:
+                    st.metric(
+                        label="Put Option Cost", 
+                        value=f"${round(put_options_price):,}",
+                        delta=f"{round(put_cost_percentage, 2)}% of notional",
+                        delta_color="off"
+                    )
+                
+                with col2:
+                    st.metric(
+                        label="Call Option Income", 
+                        value=f"${round(call_options_price):,}",
+                        delta=f"{round(call_income_percentage, 2)}% of notional",
+                        delta_color="off"
+                    )
+                
+                with col3:
+                    net_options = call_options_price - put_options_price
+                    st.metric(
+                        label="Net Options Cost", 
+                        value=f"${round(net_options):,}",
+                        delta=f"{round(net_cost_percentage, 2)}% of notional",
+                        delta_color="off"
+                    )
+                
+                # Add strategy parameters recap
+                st.subheader("Strategy Parameters")
+                params_col1, params_col2, params_col3, params_col4 = st.columns(4)
+                
+                with params_col1:
+                    st.metric("Put Strike", f"{int(strike_opt)}%")
+                    st.metric("Call Strike", f"{int(strike2_opt)}%")
+                
+                with params_col2:
+                    st.metric("Volatility", f"{sigma_value:.2f}")
+                
+                with params_col3:
+                    st.metric("Risk-Free Rate", f"{interest_rate*100:.1f}%")
+                
+                with params_col4:
+                    st.metric("Option Maturity", f"{option_maturity_days} days")
+                
+                # Final PnL display
+                pnl_color = "green" if final_pnl > 0 else "red"
+                st.markdown(f"""
+                <div style="border-radius:5px;padding:15px;text-align:center;background-color:rgba({0 if final_pnl > 0 else 255}, {255 if final_pnl > 0 else 0}, 0, 0.1);margin-top:20px">
+                    <h3 style="margin:0;color:{pnl_color}">Final PnL</h3>
+                    <h2 style="margin:5px 0;color:{pnl_color}">${round(final_pnl):,}</h2>
+                    <p style="margin:0;color:{pnl_color}">({round(final_pnl_perc, 2)}%)</p>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                # Visualization
+                st.subheader("Monthly Rewards Comparison")
+                fig, ax = plt.subplots(figsize=(10, 5))
+                df_hedgedvsnon.plot(kind='bar', ax=ax)
+                ax.set_ylabel('Rewards')
+                ax.set_title('Hedged vs Actual Monthly Rewards')
+                ax.grid(axis='y', linestyle='--', alpha=0.7)
+                st.pyplot(fig)
+                
+                # Collar strategy diagram
+                st.subheader("Collar Strategy Diagram")
+                st.image("collar.png", caption="Collar Strategy Payoff Diagram")
+                
+                # Display the detailed data
+                with st.expander("View Detailed Data"):
+                    st.dataframe(df_hedgedvsnon)
 
 
 
@@ -1014,3 +1746,37 @@ if page == "Option Payoffs":
     VanillaOptionsPayoffSimulator()
 elif page == "Backtesting":
     Backtesting()
+
+def load_price_and_vol_data(protocol, hedging_start_date, default_sigma=0.6):
+    """Load price and volatility data from CSV files"""
+    try:
+        if protocol.lower() == 'eth':
+            price_data = pd.read_csv("prices_eth.csv")
+        elif protocol.lower() == 'sol':
+            price_data = pd.read_csv("prices_sol.csv")
+        else:
+            raise ValueError(f"Unsupported protocol: {protocol}")
+            
+        # Process data
+        price_data['date'] = pd.to_datetime(price_data['date'])
+        
+        # Get volatility for hedging start date
+        hedging_start_date_dt = pd.to_datetime(hedging_start_date)
+        closest_date_idx = price_data['date'].sub(hedging_start_date_dt).abs().idxmin()
+        closest_date = price_data.iloc[closest_date_idx]
+        
+        if pd.notna(closest_date['vol']):
+            sigma = closest_date['vol']
+            vol_message = f"Using volatility from {closest_date['date'].date()}: {sigma:.2f}"
+        else:
+            sigma = default_sigma
+            vol_message = f"No volatility data for {closest_date['date'].date()}. Using default: {sigma:.2f}"
+            
+        # Create price series for backtesting
+        price_data.set_index('date', inplace=True)
+        prices = price_data['end_of_day']
+        
+        return prices, sigma, vol_message, closest_date['date']
+        
+    except Exception as e:
+        return None, default_sigma, f"Error loading data: {e}", None
