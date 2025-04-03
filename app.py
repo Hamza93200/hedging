@@ -10,7 +10,7 @@ import requests
 import time
 import os 
 
-
+os.chdir("/users/hamzamuhammad/Documents/")
 
 def black_scholes_price(option_type, S, K, T, r, sigma):
     d1 = (np.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
@@ -505,6 +505,10 @@ def put_hedge(put_strike_multiplier,daily_rewards,protocol,option_maturity,hedgi
 
     put_prices.append(put_price * (option_maturity*notional_tohedge_inkind))
 
+    hedge_strike = []
+    spot_strike = []
+
+
     for i in range(len(data_to_hedge)):
 
         if data_to_hedge.index[i]> pd.to_datetime(hedging_end_date):
@@ -526,18 +530,20 @@ def put_hedge(put_strike_multiplier,daily_rewards,protocol,option_maturity,hedgi
             if actual_accumulated_rewards < accumulated_rewards:
                 if spot <= put_strike:
                     hedged_offramp_notional.append(actual_accumulated_rewards * put_strike)
-
+                    hedge_strike.append(put_strike)
                 elif spot > put_strike:
                     hedged_offramp_notional.append(actual_accumulated_rewards * spot)
+                    spot_strike.append(spot)
 
             else:
 
                 if spot <= put_strike:
                     temp_not = accumulated_rewards * put_strike
-                    
+                    hedge_strike.append(put_strike)
 
                 elif spot > put_strike:
                     temp_not=accumulated_rewards * spot
+                    spot_strike.append(spot)
                 
                 temp_not =temp_not + ((actual_accumulated_rewards-accumulated_rewards)*spot)
 
@@ -581,9 +587,11 @@ def put_hedge(put_strike_multiplier,daily_rewards,protocol,option_maturity,hedgi
     put_options_price = sum(put_prices)
 
 
-    final_pnl = hedged_end_notional - spot_end_notional -put_options_price
+    final_pnl = hedged_end_notional - spot_end_notional - put_options_price
     final_pnl_perc = (((hedged_end_notional- put_options_price) / spot_end_notional) - 1) * 100
     df_hedged_vs_actual_rewards = pd.DataFrame({"Hegded rewards per month":monthly_hedged_rewards,"Actual rewards per month": monthly_actual_rewards})
+    st.write(hedge_strike)
+    st.write(spot_strike)
     
     return spot_end_notional,hedged_end_notional,final_pnl,final_pnl_perc,put_options_price,df_hedged_vs_actual_rewards
 
