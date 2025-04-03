@@ -11,6 +11,7 @@ import time
 import os 
 
 
+
 def black_scholes_price(option_type, S, K, T, r, sigma):
     d1 = (np.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
     d2 = d1 - sigma * np.sqrt(T)
@@ -828,11 +829,8 @@ def Backtesting():
     col1, col2, col3 = st.columns(3)
     with col1:
         start_date = st.date_input("Hedge start date", value=datetime(2025,1,1))
-    with col2:
-        rewards_frequency = st.selectbox("Rewards Frequency", options=['Daily'])
-    with col3:
-        reward_amount = st.number_input("Reward Amount in Kind", value=1.0, min_value=0.0)
-    
+
+    reward_amount=1
     if st.button("Run Strategy"):
         with st.spinner("Running hedging strategy simulation..."):
             
@@ -841,7 +839,7 @@ def Backtesting():
                 put_strike_multiplier = strike_opt/100
                 option_maturity = convert_maturity_to_days(option_maturity)
 
-                daily_rewards = reward_amount
+                daily_rewards = 1
                 
                 hedging_start_date = start_date
 
