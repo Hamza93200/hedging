@@ -11,7 +11,6 @@ import time
 import os 
 
 
-
 def black_scholes_price(option_type, S, K, T, r, sigma):
     d1 = (np.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
     d2 = d1 - sigma * np.sqrt(T)
