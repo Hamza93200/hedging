@@ -538,6 +538,7 @@ def put_hedge(put_strike_multiplier,daily_rewards,protocol,option_maturity,hedgi
             monthly_hedged_rewards .append(accumulated_rewards)
             
             hedged_offramp_rewards = []
+            actual_rewards = []
 
             strike = spot * np.exp(1/12 * IR)
             put_strike = strike *put_strike_multiplier
