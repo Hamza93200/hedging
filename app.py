@@ -10,6 +10,7 @@ import requests
 import time
 import os 
 
+os.chdir("/users/hamzamuhammad/Documents/")
 
 def black_scholes_price(option_type, S, K, T, r, sigma):
     d1 = (np.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
@@ -461,7 +462,7 @@ def collar(call_strike_multiplier,put_strike_multiplier,daily_rewards,protocol,o
 
 
 
-def put_hedge(put_strike_multiplier,daily_rewards,protocol,option_maturity,hedging_start_date,percent_to_hedge=0.7,IR=0.05,sigma=0.6,broker_spread=0.10):
+def put_hedge(put_strike_multiplier,daily_rewards,protocol,option_maturity,hedging_start_date,hedging_end_date,percent_to_hedge=0.7,IR=0.05,sigma=0.6,broker_spread=0.10):
 
     data = pd.read_excel("HP.xlsx",index_col=0,parse_dates=True)
     data_rewards = pd.read_excel("v2_revenue.xlsx",index_col=0,parse_dates=True)
@@ -494,7 +495,7 @@ def put_hedge(put_strike_multiplier,daily_rewards,protocol,option_maturity,hedgi
     put_prices = []
 
     days_until_maturity = option_maturity
-    days_until_week_end = 7
+    days_until_week_end = 1
 
     spot = data_to_hedge[0]
     strike = spot * np.exp(1/12 * IR)
@@ -506,6 +507,8 @@ def put_hedge(put_strike_multiplier,daily_rewards,protocol,option_maturity,hedgi
 
     for i in range(len(data_to_hedge)):
 
+        if data_to_hedge.index[i]> pd.to_datetime(hedging_end_date):
+            break
         
         hedged_offramp_rewards.append(notional_tohedge_inkind)
         
@@ -570,7 +573,7 @@ def put_hedge(put_strike_multiplier,daily_rewards,protocol,option_maturity,hedgi
             weekly_offramp_notional.append(accumulated_rewards * (spot - (broker_spread)) )
             weekly_offramp_rewards = []
 
-            days_until_week_end = 7
+            days_until_week_end = 1
         
         days_until_week_end -= 1
         days_until_maturity -= 1
@@ -578,10 +581,11 @@ def put_hedge(put_strike_multiplier,daily_rewards,protocol,option_maturity,hedgi
     spot_end_notional = sum(weekly_offramp_notional)
     hedged_end_notional = sum(hedged_offramp_notional)
     put_options_price = sum(put_prices)
+    st.write(hedged_end_notional)
+    st.write(spot_end_notional)
 
-
-    final_pnl = hedged_end_notional - spot_end_notional 
-    final_pnl_perc = ((hedged_end_notional / spot_end_notional) - 1) * 100
+    final_pnl = hedged_end_notional - spot_end_notional -put_options_price
+    final_pnl_perc = (((hedged_end_notional- put_options_price) / spot_end_notional) - 1) * 100
     df_hedged_vs_actual_rewards = pd.DataFrame({"Hegded rewards per month":monthly_hedged_rewards,"Actual rewards per month": monthly_actual_rewards})
     
     return spot_end_notional,hedged_end_notional,final_pnl,final_pnl_perc,put_options_price,df_hedged_vs_actual_rewards
@@ -827,6 +831,8 @@ def Backtesting():
     col1, col2, col3 = st.columns(3)
     with col1:
         start_date = st.date_input("Hedge start date", value=datetime(2025,1,1))
+    with col2:
+        end_date = st.date_input("Hedge end date", value=datetime(2025,4,1))
 
     reward_amount=1
     if st.button("Run Strategy"):
@@ -841,7 +847,7 @@ def Backtesting():
                 
                 hedging_start_date = start_date
 
-                spot_end_notional,hedged_end_notional,final_pnl,final_pnl_perc,put_options_price,df_hedged_vs_actual_rewards = put_hedge(put_strike_multiplier,daily_rewards,protocol,option_maturity,hedging_start_date,sigma =0.85)
+                spot_end_notional,hedged_end_notional,final_pnl,final_pnl_perc,put_options_price,df_hedged_vs_actual_rewards = put_hedge(put_strike_multiplier,daily_rewards,protocol,option_maturity,hedging_start_date,hedging_end_date=end_date,sigma =0.85)
                 st.subheader("Strategy Results")
 
                 st.write('### Strategy : Buy Put')
