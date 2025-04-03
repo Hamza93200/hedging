@@ -252,11 +252,13 @@ def put_hedge(put_strike_multiplier, daily_rewards, protocol, option_maturity, h
     
     for i in range(len(data_to_hedge)):
         spot = data_to_hedge[i]
-        current_date = data_to_hedge.index[i].strftime('%Y-%m-%d')
+        current_date_dt = data_to_hedge.index[i]
+        current_date = current_date_dt.strftime('%Y-%m-%d')
         today_reward = data_rewards_from_start[i]
         actual_rewards.append(today_reward)
         weekly_offramp_rewards.append(today_reward)
         
+        # Re-add the hedged strategy code
         # The hedged amount remains fixed based on previous month calculation
         hedged_offramp_rewards.append(notional_tohedge_inkind)
         
@@ -267,8 +269,11 @@ def put_hedge(put_strike_multiplier, daily_rewards, protocol, option_maturity, h
         # Check if this is the last day of the simulation
         is_last_day = (i == len(data_to_hedge) - 1)
         
-        # Revert weekly selling for standard strategy
-        if (days_until_week_end == 0 or is_last_day):
+        # Check if today is Friday (weekday=4) or last day
+        is_friday = current_date_dt.weekday() == 4
+        
+        # Weekly selling for standard strategy - only on Fridays
+        if is_friday or is_last_day:
             accumulated_rewards = sum(weekly_offramp_rewards)
             week_value = accumulated_rewards * (spot - broker_spread)
             
@@ -281,15 +286,11 @@ def put_hedge(put_strike_multiplier, daily_rewards, protocol, option_maturity, h
                 'spot_price': spot,
                 'broker_spread': broker_spread, 
                 'value': week_value,
-                'note': f"Broker spread: {broker_spread:.2f}" + (" (End of simulation)" if is_last_day else "")
+                'note': f"Friday sale with broker spread: {broker_spread:.2f}" + (" (End of simulation)" if is_last_day else "")
             })
             
             weekly_offramp_notional.append(week_value)
             weekly_offramp_rewards = [] if not is_last_day else []
-            
-            days_until_week_end = 7
-        else:
-            days_until_week_end -= 1
         
         # Monthly option handling - FIXED: Add this reset
         if days_until_maturity <= 0:
@@ -481,15 +482,11 @@ def put_hedge(put_strike_multiplier, daily_rewards, protocol, option_maturity, h
                 'spot_price': spot,
                 'broker_spread': broker_spread, 
                 'value': week_value,
-                'note': f"Broker spread: {broker_spread:.2f}" + (" (End of simulation)" if is_last_day else "")
+                'note': f"Friday sale with broker spread: {broker_spread:.2f}" + (" (End of simulation)" if is_last_day else "")
             })
             
             weekly_offramp_notional.append(week_value)
             weekly_offramp_rewards = [] if not is_last_day else []
-            
-            days_until_week_end = 7
-        else:
-            days_until_week_end -= 1
         
         # Always decrement the maturity counter
         days_until_maturity -= 1
@@ -828,6 +825,8 @@ def collar(call_strike_multiplier,put_strike_multiplier,daily_rewards,protocol,o
         hedged_offramp_rewards.append(notional_tohedge_inkind)
         
         spot = data_to_hedge[i]
+        current_date_dt = data_to_hedge.index[i]
+        current_date = current_date_dt.strftime('%Y-%m-%d')
         today_reward = data_rewards_from_start[i]
         actual_rewards.append(today_reward)
         weekly_offramp_rewards.append(today_reward)
