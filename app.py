@@ -11,6 +11,7 @@ import time
 import os 
 
 
+
 def black_scholes_price(option_type, S, K, T, r, sigma):
     d1 = (np.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
     d2 = d1 - sigma * np.sqrt(T)
@@ -530,6 +531,7 @@ def put_hedge(put_strike_multiplier,daily_rewards,protocol,option_maturity,hedgi
                     hedged_offramp_notional.append(actual_accumulated_rewards * spot)
 
             else:
+
                 if spot <= put_strike:
                     temp_not = accumulated_rewards * put_strike
                     
@@ -543,8 +545,6 @@ def put_hedge(put_strike_multiplier,daily_rewards,protocol,option_maturity,hedgi
 
 
 
-
-            
             monthly_actual_rewards.append(actual_accumulated_rewards)
             monthly_hedged_rewards .append(accumulated_rewards)
 
@@ -799,10 +799,19 @@ def Backtesting():
 
     st.subheader("Input Parameters")
     
+    col1, col2= st.columns(2)
+
+    with col1:
+        vol = st.number_input("Vol", value=0.6, min_value=0.0,max_value = 1.0)
+    with col2:
+        Risk_free_rate = st.number_input("Risk Free Rate", value=0.05, min_value=-1.0,max_value = 1.0)
 
     product = st.selectbox("Product", options =['Put','Collar'] )
     
     if product == "Collar":
+        
+
+
         col1, col2, col3,col4= st.columns(4)
         with col1:
             protocol = st.selectbox("Asset", options=hp_df.columns[1:])
@@ -844,12 +853,12 @@ def Backtesting():
                 
                 hedging_start_date = start_date
 
-                spot_end_notional,hedged_end_notional,final_pnl,final_pnl_perc,put_options_price,df_hedged_vs_actual_rewards = put_hedge(put_strike_multiplier,daily_rewards,protocol,option_maturity,hedging_start_date,hedging_end_date=end_date,sigma =0.85)
+                spot_end_notional,hedged_end_notional,final_pnl,final_pnl_perc,put_options_price,df_hedged_vs_actual_rewards = put_hedge(put_strike_multiplier,daily_rewards,protocol,option_maturity,hedging_start_date,hedging_end_date=end_date,sigma =vol,IR=Risk_free_rate)
                 st.subheader("Strategy Results")
 
                 st.write('### Strategy : Buy Put')
                 #st.write(f"Daily {daily_rewards} {protocol} rewards sold each week at spot vs each {option_maturity} days with put options strike {int(put_strike_multiplier*100)}")
-                st.write(f"**End USDT notional with weekly offramps:** {round(spot_end_notional,2):,} $")
+                st.write(f"**End USDT notional with daily offramps:** {round(spot_end_notional,2):,} $")
                 st.write(f"**End USDT notional with puts and offramps each {option_maturity} days:** {round(hedged_end_notional):,} $")
                 st.write(f"**End USDT notional spent buying put options:** {round(put_options_price):,} $")
 
