@@ -314,7 +314,7 @@ def put_hedge(put_strike_multiplier, daily_rewards, protocol, option_maturity, h
     
     # Set initial values for the first option
     spot = data_to_hedge[0]
-    strike = spot * np.exp(1/12 * IR)
+    strike = spot * np.exp((option_maturity/365) * IR)
     put_strike = strike * put_strike_multiplier
     
     # Get initial volatility
@@ -334,6 +334,9 @@ def put_hedge(put_strike_multiplier, daily_rewards, protocol, option_maturity, h
     option_cost = put_price * (option_maturity * notional_tohedge_inkind)
     put_prices.append(option_cost)
     
+    # Store the total hedge amount for this option period
+    current_period_hedge_amount = option_maturity * notional_tohedge_inkind
+    
     # Improve transaction log for initial option purchase
     transaction_log.append({
         'date': data_to_hedge.index[0].strftime('%Y-%m-%d'),
@@ -341,7 +344,7 @@ def put_hedge(put_strike_multiplier, daily_rewards, protocol, option_maturity, h
         'details': f"Bought put option at strike {put_strike:.2f} ({put_strike_multiplier*100:.0f}% of {spot:.2f})",
         'strike': put_strike,
         'spot_price': spot,
-        'rewards_amount': option_maturity * notional_tohedge_inkind,
+        'rewards_amount': current_period_hedge_amount,
         'premium_per_unit': put_price,
         'cost': option_cost,
         'vol': current_sigma,
@@ -434,7 +437,7 @@ def put_hedge(put_strike_multiplier, daily_rewards, protocol, option_maturity, h
                 })
                 
                 nonhedged_offramp_notional.append(weekly_nonhedged_value)
-                weekly_nonhedged_rewards = [] if not is_last_day else []
+                weekly_nonhedged_rewards = [] 
         
         # Monthly option handling
         if days_until_maturity <= 0:
@@ -446,8 +449,13 @@ def put_hedge(put_strike_multiplier, daily_rewards, protocol, option_maturity, h
             monthly_actual_rewards.append(actual_accumulated_rewards)
             monthly_hedged_rewards.append(accumulated_rewards)
             
-            # Calculate hedged amount payoff
-            hedged_amount = min(accumulated_rewards, actual_accumulated_rewards)
+            # Use the fixed hedge amount that was set at option purchase time
+            # but capped by the actual accumulated rewards to avoid hedging more than we have
+            hedged_amount = min(current_period_hedge_amount, actual_accumulated_rewards)
+            
+            st.write(f"Option expiry: Using hedge amount of {hedged_amount:.4f} " + 
+                     f"(original target: {current_period_hedge_amount:.4f}, actual rewards: {actual_accumulated_rewards:.4f})")
+            
             if spot <= put_strike:
                 hedged_value = hedged_amount * put_strike
             else:
@@ -546,7 +554,7 @@ def put_hedge(put_strike_multiplier, daily_rewards, protocol, option_maturity, h
                 period_hedge_target = option_maturity * notional_tohedge_inkind
                 
                 # Calculate new option values with the updated hedging amount
-                strike = spot * np.exp(1/12 * IR)
+                strike = spot * np.exp((option_maturity/365) * IR)
                 put_strike = strike * put_strike_multiplier
                 
                 # Get volatility for new option
@@ -561,7 +569,11 @@ def put_hedge(put_strike_multiplier, daily_rewards, protocol, option_maturity, h
                 
                 # Calculate option premium for next month - FIXED COST CALCULATION
                 put_price = black_scholes_put(spot, put_strike, option_maturity/365, IR, current_sigma)
-                option_cost = put_price * (option_maturity * notional_tohedge_inkind)
+                
+                # Update the current period hedge amount for the new option
+                current_period_hedge_amount = option_maturity * notional_tohedge_inkind
+                option_cost = put_price * current_period_hedge_amount
+                
                 put_prices.append(option_cost)
                 
                 # For the new option purchase after expiry:
@@ -571,7 +583,7 @@ def put_hedge(put_strike_multiplier, daily_rewards, protocol, option_maturity, h
                     'details': f"Bought put option at strike {put_strike:.2f} ({put_strike_multiplier*100:.0f}% of {spot:.2f})",
                     'strike': put_strike,
                     'spot_price': spot,
-                    'rewards_amount': option_maturity * notional_tohedge_inkind,
+                    'rewards_amount': current_period_hedge_amount,
                     'premium_per_unit': put_price,
                     'cost': option_cost,
                     'vol': current_sigma,
@@ -635,15 +647,17 @@ def put_hedge(put_strike_multiplier, daily_rewards, protocol, option_maturity, h
         accumulated_rewards = sum(hedged_offramp_rewards)
         actual_accumulated = sum(actual_rewards)
         
-        # For the final exercise, consider if we've accumulated enough rewards
-        # to cover the hedged amount for the period
-        final_hedge_amount = min(accumulated_rewards, actual_accumulated)
-        final_hedge_needed = min(final_hedge_amount, period_hedge_target)
+        # For the final exercise, use the fixed hedge amount rather than accumulated rewards
+        # But cap it by the actual accumulated rewards
+        final_hedge_amount = min(current_period_hedge_amount, actual_accumulated)
+        
+        st.write(f"Final option: Using hedge amount of {final_hedge_amount:.4f} " + 
+                 f"(original target: {current_period_hedge_amount:.4f}, actual accumulated: {actual_accumulated:.4f})")
         
         # Calculate hedged amount payoff for final option
         if final_spot <= put_strike:
-            hedged_value = final_hedge_needed * put_strike
-            protection_value = final_hedge_needed * (put_strike - final_spot)
+            hedged_value = final_hedge_amount * put_strike
+            protection_value = final_hedge_amount * (put_strike - final_spot)
             
             # Log the final option exercise
             transaction_log.append({
@@ -652,7 +666,7 @@ def put_hedge(put_strike_multiplier, daily_rewards, protocol, option_maturity, h
                 'details': f"Final spot ({final_spot:.2f}) below strike ({put_strike:.2f}), exercised put option",
                 'strike': put_strike,
                 'spot_price': final_spot,
-                'rewards_amount': final_hedge_needed,
+                'rewards_amount': final_hedge_amount,
                 'protection_value': protection_value,
                 'notional_protected': hedged_value,
                 'original_cost': option_cost
@@ -661,7 +675,7 @@ def put_hedge(put_strike_multiplier, daily_rewards, protocol, option_maturity, h
             hedged_strategy_log.append({
                 'date': final_date,
                 'action': 'Final Option Exercise',
-                'rewards_amount': final_hedge_needed,
+                'rewards_amount': final_hedge_amount,
                 'sale_price': put_strike,
                 'spot_price': final_spot,
                 'value': hedged_value,
@@ -670,7 +684,7 @@ def put_hedge(put_strike_multiplier, daily_rewards, protocol, option_maturity, h
                 'note': f"Put protection at end of simulation: {protection_value:.2f}"
             })
         else:
-            hedged_value = final_hedge_needed * final_spot
+            hedged_value = final_hedge_amount * final_spot
             
             # Log the final option expiry
             transaction_log.append({
@@ -679,7 +693,7 @@ def put_hedge(put_strike_multiplier, daily_rewards, protocol, option_maturity, h
                 'details': f"Final spot ({final_spot:.2f}) above strike ({put_strike:.2f}), option not exercised",
                 'strike': put_strike,
                 'spot_price': final_spot,
-                'rewards_amount': final_hedge_needed,
+                'rewards_amount': final_hedge_amount,
                 'protection_value': 0,
                 'notional_at_spot': hedged_value,
                 'original_cost': option_cost
@@ -688,7 +702,7 @@ def put_hedge(put_strike_multiplier, daily_rewards, protocol, option_maturity, h
             hedged_strategy_log.append({
                 'date': final_date,
                 'action': 'Final Option Expiry',
-                'rewards_amount': final_hedge_needed,
+                'rewards_amount': final_hedge_amount,
                 'sale_price': final_spot,
                 'spot_price': final_spot,
                 'value': hedged_value,
@@ -700,7 +714,7 @@ def put_hedge(put_strike_multiplier, daily_rewards, protocol, option_maturity, h
         
         # Calculate if there are any excess rewards beyond what was needed for hedging
         # This includes any rewards that haven't been sold weekly already
-        excess_rewards = actual_accumulated - final_hedge_needed + sum(weekly_nonhedged_rewards)
+        excess_rewards = actual_accumulated - final_hedge_amount + sum(weekly_nonhedged_rewards)
         
         # Handle any remaining non-hedged rewards that haven't been sold weekly
         if excess_rewards > 0:
