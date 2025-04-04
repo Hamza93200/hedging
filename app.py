@@ -7,7 +7,7 @@ from scipy.stats import norm
 from datetime import datetime
 import requests
 import time
-import os 
+import os
 
 
 
@@ -104,6 +104,92 @@ def black_scholes_call(S, K, T, r, sigma):
     call_price = S * norm.cdf(d1) - K * np.exp(-r * T) * norm.cdf(d2)
     return call_price
 
+def save_simulation_to_csv(strategy_name, protocol, simulation_data, parameters=None):
+    """
+    Save detailed simulation data to CSV files for verification and analysis
+    
+    Args:
+        strategy_name: Name of the strategy (Put/Collar)
+        protocol: Asset (ETH/SOL)
+        simulation_data: Dict containing all logs and transaction data
+        parameters: Dict containing simulation parameters
+    """
+    try:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_dir = "simulation_results"
+        
+        # Create directory if it doesn't exist
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
+        
+        # Base filename for all related CSVs
+        base_filename = f"{output_dir}/{timestamp}_{strategy_name}_{protocol}"
+        saved_files = []
+        
+        # Save strategy parameters
+        if parameters:
+            try:
+                params_df = pd.DataFrame([parameters])
+                params_file = f"{base_filename}_parameters.csv"
+                params_df.to_csv(params_file, index=False)
+                saved_files.append(params_file)
+            except Exception as e:
+                st.warning(f"Failed to save parameters: {str(e)}")
+        
+        # Save transaction logs (options purchases/exercises)
+        if 'transaction_log' in simulation_data and not simulation_data['transaction_log'].empty:
+            try:
+                tx_file = f"{base_filename}_options_transactions.csv"
+                simulation_data['transaction_log'].to_csv(tx_file, index=False)
+                saved_files.append(tx_file)
+            except Exception as e:
+                st.warning(f"Failed to save options transactions: {str(e)}")
+        
+        # Save non-hedged strategy operations (spot sales)
+        if 'spot_strategy_log' in simulation_data and not simulation_data['spot_strategy_log'].empty:
+            try:
+                spot_file = f"{base_filename}_spot_strategy.csv"
+                simulation_data['spot_strategy_log'].to_csv(spot_file, index=False)
+                saved_files.append(spot_file)
+            except Exception as e:
+                st.warning(f"Failed to save spot strategy logs: {str(e)}")
+        
+        # Save hedged strategy operations
+        if 'hedged_strategy_log' in simulation_data and not simulation_data['hedged_strategy_log'].empty:
+            try:
+                hedged_file = f"{base_filename}_hedged_strategy.csv"
+                simulation_data['hedged_strategy_log'].to_csv(hedged_file, index=False)
+                saved_files.append(hedged_file)
+            except Exception as e:
+                st.warning(f"Failed to save hedged strategy logs: {str(e)}")
+        
+        # If parameters includes a dataframe, save it
+        if 'parameters' in simulation_data:
+            try:
+                params_dataframe_file = f"{base_filename}_parameters_df.csv"
+                simulation_data['parameters'].to_csv(params_dataframe_file, index=False)
+                saved_files.append(params_dataframe_file)
+            except Exception as e:
+                st.warning(f"Failed to save parameters dataframe: {str(e)}")
+        
+        # If monthly_rewards is included, save it
+        if 'monthly_rewards' in simulation_data:
+            try:
+                monthly_file = f"{base_filename}_monthly_rewards.csv"
+                simulation_data['monthly_rewards'].to_csv(monthly_file, index=False)
+                saved_files.append(monthly_file)
+            except Exception as e:
+                st.warning(f"Failed to save monthly rewards: {str(e)}")
+        
+        if not saved_files:
+            st.warning("No simulation data was saved. Check logs for errors.")
+        
+        return base_filename
+    
+    except Exception as e:
+        st.error(f"Error saving simulation data: {str(e)}")
+        return None
+
 
 
 def put_hedge(put_strike_multiplier, daily_rewards, protocol, option_maturity, hedging_start_date, hedging_end_date=None, percent_to_hedge=0.7, IR=0.05, sigma=0.6, broker_spread=0.10):
@@ -180,6 +266,14 @@ def put_hedge(put_strike_multiplier, daily_rewards, protocol, option_maturity, h
     st.write(f"Previous month daily average rewards: {prev_month_avg_daily:.4f}")
     st.write(f"Hedged amount (fixed): {notional_tohedge_inkind:.4f} ({percent_to_hedge*100:.0f}%)")
     
+    # Add explanation of the hedging strategy
+    st.info("""
+    ### Hedging Strategy
+    1. For each period, we first accumulate rewards until we reach the total hedged amount.
+    2. Only after reaching the hedging threshold, excess rewards are sold weekly on Fridays.
+    3. The hedged rewards are exercised or sold at the end of the option period.
+    """)
+    
     mask = data_rewards.index >= pd.to_datetime(hedging_start_date)
 
     data_rewards_from_start = data_rewards.loc[mask, protocol]
@@ -196,6 +290,14 @@ def put_hedge(put_strike_multiplier, daily_rewards, protocol, option_maturity, h
     weekly_offramp_notional = []
     hedged_offramp_notional = []
     nonhedged_offramp_notional = []  # Track non-hedged portion separately
+    weekly_nonhedged_rewards = []  # Weekly tracking for excess rewards
+
+    # Track total rewards accumulated in the current option period
+    period_accumulated_rewards = 0
+    # Total hedged amount needed for the current option period
+    period_hedge_target = option_maturity * notional_tohedge_inkind
+    
+    st.write(f"Hedging target per period: {period_hedge_target:.4f}")
 
     put_prices = []
     
@@ -258,12 +360,33 @@ def put_hedge(put_strike_multiplier, daily_rewards, protocol, option_maturity, h
         actual_rewards.append(today_reward)
         weekly_offramp_rewards.append(today_reward)
         
-        # Re-add the hedged strategy code
         # The hedged amount remains fixed based on previous month calculation
         hedged_offramp_rewards.append(notional_tohedge_inkind)
         
-        # Non-hedged is the difference between actual reward and hedged amount
-        non_hedged_amount = max(0, today_reward - notional_tohedge_inkind)
+        # Increase total accumulated rewards for the period
+        period_accumulated_rewards += today_reward
+        
+        # Determine if we've accumulated enough rewards to cover the hedged amount
+        # We only start selling excess rewards when we've accumulated enough to cover the hedged amount
+        excess_reward_available = period_accumulated_rewards > period_hedge_target
+        
+        # Calculate non-hedged amount only if we have excess rewards
+        if excess_reward_available:
+            # Today's non-hedged amount is only the portion exceeding what we need for hedging
+            # This is the amount that will be sold on the next Friday
+            non_hedged_amount = max(0, period_accumulated_rewards - period_hedge_target)
+            st.write(f"{current_date}: Accumulated enough rewards ({period_accumulated_rewards:.4f}). Excess: {non_hedged_amount:.4f}")
+            # Reset the accumulated amount to exactly the target (since we're considering excess as non-hedged)
+            period_accumulated_rewards = period_hedge_target
+            # Add to weekly non-hedged rewards for potential Friday selling
+            weekly_nonhedged_rewards.append(non_hedged_amount)
+        else:
+            # If we don't have excess rewards yet, nothing is non-hedged
+            # We need to accumulate more rewards to reach the hedging target first
+            non_hedged_amount = 0
+            if i % 7 == 0:  # Log status weekly to keep track
+                st.write(f"{current_date}: Still accumulating rewards ({period_accumulated_rewards:.4f}/{period_hedge_target:.4f})")
+        
         nonhedged_offramp_rewards.append(non_hedged_amount)
         
         # Check if this is the last day of the simulation
@@ -291,12 +414,32 @@ def put_hedge(put_strike_multiplier, daily_rewards, protocol, option_maturity, h
             
             weekly_offramp_notional.append(week_value)
             weekly_offramp_rewards = [] if not is_last_day else []
+            
+            # Only sell non-hedged rewards if we have accumulated enough to cover the hedged amount
+            # and there are excess rewards to sell
+            if sum(weekly_nonhedged_rewards) > 0:
+                weekly_nonhedged_total = sum(weekly_nonhedged_rewards)
+                weekly_nonhedged_value = weekly_nonhedged_total * (spot - broker_spread)
+                
+                hedged_strategy_log.append({
+                    'date': current_date,
+                    'action': 'Weekly Non-Hedged Sale',
+                    'rewards_amount': weekly_nonhedged_total,
+                    'sale_price': spot - broker_spread,
+                    'spot_price': spot,
+                    'value': weekly_nonhedged_value,
+                    'strike': None,
+                    'protection_value': 0,
+                    'note': f"Weekly sale of excess rewards after reaching hedging target ({period_accumulated_rewards:.4f}/{period_hedge_target:.4f})"
+                })
+                
+                nonhedged_offramp_notional.append(weekly_nonhedged_value)
+                weekly_nonhedged_rewards = [] if not is_last_day else []
         
-        # Monthly option handling - FIXED: Add this reset
+        # Monthly option handling
         if days_until_maturity <= 0:
             # Process expired option and accumulated rewards
             accumulated_rewards = sum(hedged_offramp_rewards)
-            nonhedged_accumulated = sum(nonhedged_offramp_rewards)
             actual_accumulated_rewards = sum(actual_rewards)
             
             # Record the monthly data
@@ -312,9 +455,6 @@ def put_hedge(put_strike_multiplier, daily_rewards, protocol, option_maturity, h
             
             # Add hedged value to the hedged notional
             hedged_offramp_notional.append(hedged_value)
-            
-            # Non-hedged portion
-            nonhedged_offramp_notional.append(nonhedged_accumulated * spot)
             
             # Log option exercise outcome
             option_exercised = spot <= put_strike
@@ -371,23 +511,12 @@ def put_hedge(put_strike_multiplier, daily_rewards, protocol, option_maturity, h
                     'note': "Option not exercised (spot > strike)"
                 })
             
-            # Improve non-hedged portion logging
-            hedged_strategy_log.append({
-                'date': current_date,
-                'action': 'Non-Hedged Portion',
-                'rewards_amount': nonhedged_accumulated,
-                'sale_price': spot,
-                'spot_price': spot,
-                'value': nonhedged_accumulated * spot,
-                'strike': None,
-                'protection_value': 0,
-                'note': "Unhedged rewards (sold at spot)"
-            })
-            
             # Reset tracking arrays for the next period
             hedged_offramp_rewards = []
             nonhedged_offramp_rewards = []
             actual_rewards = []
+            # Reset accumulated rewards for the next period
+            period_accumulated_rewards = 0
             
             # Check if there's enough time left for another option period
             days_remaining = len(data_to_hedge) - (i + 1)
@@ -412,6 +541,9 @@ def put_hedge(put_strike_multiplier, daily_rewards, protocol, option_maturity, h
                     st.write(f"New hedged amount: {notional_tohedge_inkind:.4f} ({percent_to_hedge*100:.0f}%)")
                 else:
                     st.warning(f"No rewards data found for previous month. Using existing hedge amount.")
+                
+                # Update the period hedge target with the new daily hedge amount
+                period_hedge_target = option_maturity * notional_tohedge_inkind
                 
                 # Calculate new option values with the updated hedging amount
                 strike = spot * np.exp(1/12 * IR)
@@ -456,6 +588,8 @@ def put_hedge(put_strike_multiplier, daily_rewards, protocol, option_maturity, h
                 notional_tohedge_inkind = 0
                 # Reset days_until_maturity to ensure we don't try to buy again
                 days_until_maturity = days_remaining + 1
+                # Reset period hedge target since we're not hedging anymore
+                period_hedge_target = 0
                 
                 # Log that we're not purchasing a new option
                 transaction_log.append({
@@ -499,13 +633,17 @@ def put_hedge(put_strike_multiplier, daily_rewards, protocol, option_maturity, h
         final_date = data_to_hedge.index[-1].strftime('%Y-%m-%d')
         
         accumulated_rewards = sum(hedged_offramp_rewards)
-        nonhedged_accumulated = sum(nonhedged_offramp_rewards)
+        actual_accumulated = sum(actual_rewards)
+        
+        # For the final exercise, consider if we've accumulated enough rewards
+        # to cover the hedged amount for the period
+        final_hedge_amount = min(accumulated_rewards, actual_accumulated)
+        final_hedge_needed = min(final_hedge_amount, period_hedge_target)
         
         # Calculate hedged amount payoff for final option
-        hedged_amount = min(accumulated_rewards, sum(actual_rewards))
         if final_spot <= put_strike:
-            hedged_value = hedged_amount * put_strike
-            protection_value = hedged_amount * (put_strike - final_spot)
+            hedged_value = final_hedge_needed * put_strike
+            protection_value = final_hedge_needed * (put_strike - final_spot)
             
             # Log the final option exercise
             transaction_log.append({
@@ -514,7 +652,7 @@ def put_hedge(put_strike_multiplier, daily_rewards, protocol, option_maturity, h
                 'details': f"Final spot ({final_spot:.2f}) below strike ({put_strike:.2f}), exercised put option",
                 'strike': put_strike,
                 'spot_price': final_spot,
-                'rewards_amount': hedged_amount,
+                'rewards_amount': final_hedge_needed,
                 'protection_value': protection_value,
                 'notional_protected': hedged_value,
                 'original_cost': option_cost
@@ -523,7 +661,7 @@ def put_hedge(put_strike_multiplier, daily_rewards, protocol, option_maturity, h
             hedged_strategy_log.append({
                 'date': final_date,
                 'action': 'Final Option Exercise',
-                'rewards_amount': hedged_amount,
+                'rewards_amount': final_hedge_needed,
                 'sale_price': put_strike,
                 'spot_price': final_spot,
                 'value': hedged_value,
@@ -532,7 +670,7 @@ def put_hedge(put_strike_multiplier, daily_rewards, protocol, option_maturity, h
                 'note': f"Put protection at end of simulation: {protection_value:.2f}"
             })
         else:
-            hedged_value = hedged_amount * final_spot
+            hedged_value = final_hedge_needed * final_spot
             
             # Log the final option expiry
             transaction_log.append({
@@ -541,7 +679,7 @@ def put_hedge(put_strike_multiplier, daily_rewards, protocol, option_maturity, h
                 'details': f"Final spot ({final_spot:.2f}) above strike ({put_strike:.2f}), option not exercised",
                 'strike': put_strike,
                 'spot_price': final_spot,
-                'rewards_amount': hedged_amount,
+                'rewards_amount': final_hedge_needed,
                 'protection_value': 0,
                 'notional_at_spot': hedged_value,
                 'original_cost': option_cost
@@ -550,28 +688,35 @@ def put_hedge(put_strike_multiplier, daily_rewards, protocol, option_maturity, h
             hedged_strategy_log.append({
                 'date': final_date,
                 'action': 'Final Option Expiry',
-                'rewards_amount': hedged_amount,
+                'rewards_amount': final_hedge_needed,
                 'sale_price': final_spot,
                 'spot_price': final_spot,
                 'value': hedged_value,
                 'note': "Option not exercised at end of simulation"
             })
         
-        # Add the final hedged and non-hedged values
+        # Add the final hedged values
         hedged_offramp_notional.append(hedged_value)
-        nonhedged_offramp_notional.append(nonhedged_accumulated * final_spot)
         
-        # Log the non-hedged portion
-        if nonhedged_accumulated > 0:
+        # Calculate if there are any excess rewards beyond what was needed for hedging
+        # This includes any rewards that haven't been sold weekly already
+        excess_rewards = actual_accumulated - final_hedge_needed + sum(weekly_nonhedged_rewards)
+        
+        # Handle any remaining non-hedged rewards that haven't been sold weekly
+        if excess_rewards > 0:
+            remaining_value = excess_rewards * (final_spot - broker_spread)
+            
             hedged_strategy_log.append({
                 'date': final_date,
-                'action': 'Final Non-Hedged Liquidation',
-                'rewards_amount': nonhedged_accumulated,
-                'sale_price': final_spot,
+                'action': 'Final Non-Hedged Sale',
+                'rewards_amount': excess_rewards,
+                'sale_price': final_spot - broker_spread,
                 'spot_price': final_spot,
-                'value': nonhedged_accumulated * final_spot,
-                'note': "Final liquidation of unhedged rewards"
+                'value': remaining_value,
+                'note': f"Final liquidation of excess rewards with broker spread: {broker_spread:.2f}"
             })
+            
+            nonhedged_offramp_notional.append(remaining_value)
     
     # Calculate final notionals
     spot_end_notional = sum(weekly_offramp_notional)
@@ -1483,6 +1628,33 @@ def Backtesting():
                         st.dataframe(hedged_log, use_container_width=True)
                     else:
                         st.info("No hedged strategy transactions recorded")
+                
+                # Save simulation results to CSV for verification
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                simulation_parameters = {
+                    'strategy': 'Put',
+                    'protocol': protocol,
+                    'start_date': str(hedging_start_date),
+                    'end_date': str(hedging_end_date),
+                    'option_maturity': option_maturity_days,
+                    'put_strike_pct': strike_opt,
+                    'percent_to_hedge': percent_to_hedge*100,
+                    'interest_rate': interest_rate,
+                    'broker_spread': broker_spread,
+                    'total_options_cost': put_options_price,
+                    'non_hedged_value': spot_end_notional,
+                    'hedged_value': hedged_net_value,
+                    'final_pnl': final_pnl,
+                    'final_pnl_pct': final_pnl_perc
+                }
+                
+                csv_path = save_simulation_to_csv('Put', protocol, vol_info, simulation_parameters)
+                st.success(f"📊 Simulation data saved to CSV files with prefix: {csv_path}")
+                st.download_button(
+                    label="📥 Download Simulation Details",
+                    data=f"Simulation files saved to:\n{csv_path}_parameters.csv\n{csv_path}_options_transactions.csv\n{csv_path}_spot_strategy.csv\n{csv_path}_hedged_strategy.csv",
+                    file_name=f"simulation_files_{timestamp}.txt"
+                )
             
             # Similar improvements for Call and Collar strategies...
             if product == "Call":
@@ -1643,6 +1815,42 @@ def Backtesting():
                 # Display the detailed data
                 with st.expander("View Detailed Data"):
                     st.dataframe(df_hedgedvsnon)
+                
+                # Save simulation results to CSV for verification
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                simulation_parameters = {
+                    'strategy': 'Collar',
+                    'protocol': protocol,
+                    'start_date': str(hedging_start_date),
+                    'end_date': str(hedging_end_date),
+                    'option_maturity': option_maturity_days,
+                    'put_strike_pct': strike_opt,
+                    'call_strike_pct': strike2_opt,
+                    'percent_to_hedge': percent_to_hedge*100,
+                    'interest_rate': interest_rate,
+                    'broker_spread': broker_spread,
+                    'put_options_cost': put_options_price,
+                    'call_options_income': call_options_price,
+                    'net_option_cost': options_price_paid,
+                    'non_hedged_value': spot_end_notional,
+                    'hedged_value': hedged_end_notional,
+                    'final_pnl': final_pnl,
+                    'final_pnl_pct': final_pnl_perc
+                }
+                
+                # Create a dict for the collar strategy data, similar to vol_info for put strategy
+                collar_logs = {
+                    'parameters': pd.DataFrame([simulation_parameters]),
+                    'monthly_rewards': df_hedgedvsnon
+                }
+                
+                csv_path = save_simulation_to_csv('Collar', protocol, collar_logs, simulation_parameters)
+                st.success(f"📊 Simulation data saved to CSV files with prefix: {csv_path}")
+                st.download_button(
+                    label="📥 Download Simulation Details",
+                    data=f"Simulation files saved to:\n{csv_path}_parameters.csv\n{csv_path}_monthly_rewards.csv",
+                    file_name=f"simulation_files_{timestamp}.txt"
+                )
 
 
 
@@ -1746,36 +1954,3 @@ if page == "Option Payoffs":
 elif page == "Backtesting":
     Backtesting()
 
-def load_price_and_vol_data(protocol, hedging_start_date, default_sigma=0.6):
-    """Load price and volatility data from CSV files"""
-    try:
-        if protocol.lower() == 'eth':
-            price_data = pd.read_csv("prices_eth.csv")
-        elif protocol.lower() == 'sol':
-            price_data = pd.read_csv("prices_sol.csv")
-        else:
-            raise ValueError(f"Unsupported protocol: {protocol}")
-            
-        # Process data
-        price_data['date'] = pd.to_datetime(price_data['date'])
-        
-        # Get volatility for hedging start date
-        hedging_start_date_dt = pd.to_datetime(hedging_start_date)
-        closest_date_idx = price_data['date'].sub(hedging_start_date_dt).abs().idxmin()
-        closest_date = price_data.iloc[closest_date_idx]
-        
-        if pd.notna(closest_date['vol']):
-            sigma = closest_date['vol']
-            vol_message = f"Using volatility from {closest_date['date'].date()}: {sigma:.2f}"
-        else:
-            sigma = default_sigma
-            vol_message = f"No volatility data for {closest_date['date'].date()}. Using default: {sigma:.2f}"
-            
-        # Create price series for backtesting
-        price_data.set_index('date', inplace=True)
-        prices = price_data['end_of_day']
-        
-        return prices, sigma, vol_message, closest_date['date']
-        
-    except Exception as e:
-        return None, default_sigma, f"Error loading data: {e}", None
