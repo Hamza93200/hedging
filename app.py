@@ -250,6 +250,12 @@ def put_hedge(put_strike_multiplier, daily_rewards, protocol, option_maturity, h
     # Add a flag to track if final liquidation has happened
     final_liquidation_done = False
     
+    # Add structure to track period-by-period revenue summary
+    revenue_summary = []
+    period_start_date = None
+    period_spot_revenue = 0
+    period_hedged_revenue = 0
+    
     for i in range(len(data_to_hedge)):
         spot = data_to_hedge[i]
         current_date_dt = data_to_hedge.index[i]
@@ -272,6 +278,10 @@ def put_hedge(put_strike_multiplier, daily_rewards, protocol, option_maturity, h
         # Check if today is Friday (weekday=4) or last day
         is_friday = current_date_dt.weekday() == 4
         
+        # Track the start date of each option period
+        if days_until_maturity == option_maturity:
+            period_start_date = current_date
+        
         # Weekly selling for standard strategy - only on Fridays
         if is_friday or is_last_day:
             accumulated_rewards = sum(weekly_offramp_rewards)
@@ -291,6 +301,9 @@ def put_hedge(put_strike_multiplier, daily_rewards, protocol, option_maturity, h
             
             weekly_offramp_notional.append(week_value)
             weekly_offramp_rewards = [] if not is_last_day else []
+            
+            # Track weekly revenue for the period summary
+            period_spot_revenue += week_value
         
         # Monthly option handling - FIXED: Add this reset
         if days_until_maturity <= 0:
@@ -572,6 +585,38 @@ def put_hedge(put_strike_multiplier, daily_rewards, protocol, option_maturity, h
                 'value': nonhedged_accumulated * final_spot,
                 'note': "Final liquidation of unhedged rewards"
             })
+        
+        # Calculate total hedged revenue for this period
+        if option_exercised:
+            hedged_revenue = hedged_amount * put_strike
+        else:
+            hedged_revenue = hedged_amount * spot
+        
+        # Add non-hedged portion
+        period_hedged_revenue = hedged_revenue + (nonhedged_accumulated * spot)
+        
+        # Add the period summary to our tracking
+        end_date = current_date
+        current_option_cost = put_prices[-1] if len(put_prices) >= 1 else 0
+        
+        revenue_summary.append({
+            'Period': f"{period_start_date} to {end_date}",
+            'Start Date': period_start_date,
+            'End Date': end_date,
+            'Spot Revenue': period_spot_revenue,
+            'Hedged Revenue (Gross)': period_hedged_revenue,
+            'Option Cost': current_option_cost,
+            'Hedged Revenue (Net)': period_hedged_revenue - current_option_cost,
+            'Difference': (period_hedged_revenue - current_option_cost) - period_spot_revenue,
+            'End Spot Price': spot,
+            'Strike Price': put_strike,
+            'Option Exercised': option_exercised
+        })
+        
+        # Reset period tracking
+        period_start_date = None
+        period_spot_revenue = 0
+        period_hedged_revenue = 0
     
     # Calculate final notionals
     spot_end_notional = sum(weekly_offramp_notional)
@@ -608,6 +653,9 @@ def put_hedge(put_strike_multiplier, daily_rewards, protocol, option_maturity, h
     hedged_log_df = pd.DataFrame(hedged_strategy_log)
     transaction_log_df = pd.DataFrame(transaction_log)
     
+    # Create the revenue summary DataFrame
+    revenue_summary_df = pd.DataFrame(revenue_summary)
+    
     # Return with properly formatted hybrid data
     return spot_end_notional, hedged_end_notional, final_pnl, final_pnl_perc, sum(put_prices), df_hedged_vs_actual_rewards, nonhedged_notional, {
         'avg_vol': avg_volatility,
@@ -615,7 +663,8 @@ def put_hedge(put_strike_multiplier, daily_rewards, protocol, option_maturity, h
         'max_vol': max_volatility,
         'transaction_log': transaction_log_df,
         'spot_strategy_log': spot_log_df,
-        'hedged_strategy_log': hedged_log_df
+        'hedged_strategy_log': hedged_log_df,
+        'revenue_summary': revenue_summary_df  # Add the revenue summary to the return data
     }
 
 
@@ -1643,6 +1692,78 @@ def Backtesting():
                 # Display the detailed data
                 with st.expander("View Detailed Data"):
                     st.dataframe(df_hedgedvsnon)
+
+    # After displaying the other results, add the revenue summary table
+    if 'vol_info' in locals() and vol_info is not None and 'revenue_summary' in vol_info:
+        st.subheader("Strategy Revenue Comparison by Period")
+        
+        # Get the revenue summary DataFrame
+        revenue_df = vol_info['revenue_summary']
+        
+        if not revenue_df.empty:
+            # Calculate total row
+            total_row = {
+                'Period': 'TOTAL',
+                'Start Date': '',
+                'End Date': '',
+                'Spot Revenue': revenue_df['Spot Revenue'].sum(),
+                'Hedged Revenue (Gross)': revenue_df['Hedged Revenue (Gross)'].sum(),
+                'Option Cost': revenue_df['Option Cost'].sum(),
+                'Hedged Revenue (Net)': revenue_df['Hedged Revenue (Net)'].sum(),
+                'Difference': revenue_df['Difference'].sum(),
+                'End Spot Price': '',
+                'Strike Price': '',
+                'Option Exercised': ''
+            }
+            
+            # Add the total row
+            revenue_df = pd.concat([revenue_df, pd.DataFrame([total_row])], ignore_index=True)
+            
+            # Format the dataframe for display
+            display_df = revenue_df.copy()
+            
+            # Format currency columns
+            currency_cols = ['Spot Revenue', 'Hedged Revenue (Gross)', 'Option Cost', 
+                             'Hedged Revenue (Net)', 'Difference']
+            
+            for col in currency_cols:
+                display_df[col] = display_df[col].apply(
+                    lambda x: f"${x:,.2f}" if pd.notnull(x) else ""
+                )
+            
+            # Format price columns
+            price_cols = ['End Spot Price', 'Strike Price']
+            for col in price_cols:
+                display_df[col] = display_df[col].apply(
+                    lambda x: f"${x:,.2f}" if pd.notnull(x) else ""
+                )
+            
+            # Highlight the total row
+            display_df.iloc[-1, 0] = f"**{display_df.iloc[-1, 0]}**"
+            
+            # Display the table
+            st.dataframe(display_df, use_container_width=True)
+            
+            # Add explanation
+            st.info("""
+            **Revenue Summary Explanation:**
+            - **Spot Revenue**: Total revenue from selling rewards at spot price weekly
+            - **Hedged Revenue (Gross)**: Revenue from the hedged strategy before option costs
+            - **Option Cost**: Cost of put options purchased for the period
+            - **Hedged Revenue (Net)**: Hedged revenue minus option costs
+            - **Difference**: How much the hedged strategy outperformed (or underperformed) the non-hedged strategy
+            """)
+            
+            # Add a download button for the data
+            csv = revenue_df.to_csv(index=False)
+            st.download_button(
+                label="Download Revenue Summary Data",
+                data=csv,
+                file_name="strategy_revenue_summary.csv",
+                mime="text/csv",
+            )
+        else:
+            st.info("No revenue summary data available")
 
 
 
